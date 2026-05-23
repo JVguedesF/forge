@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/database/isar_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_provider.dart';
+import 'core/router.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,15 +17,12 @@ class ForgeApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = ref.watch(themeProvider);
-    return MaterialApp(
+    final router = ref.watch(routerProvider);
+    return MaterialApp.router(
       title: 'Forge',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.build(theme),
-      home: const Scaffold(
-        body: Center(
-          child: Text('Forge', style: TextStyle(fontSize: 48)),
-        ),
-      ),
+      routerConfig: router,
     );
   }
 }
