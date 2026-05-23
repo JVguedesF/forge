@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/theme_provider.dart';
+import 'package:go_router/go_router.dart';
 
 class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
@@ -76,7 +77,7 @@ class _LibHeader extends StatelessWidget {
                     color: ForgeColors.text)),
           ),
           GestureDetector(
-            onTap: () {},
+            onTap: () => context.push('/builder'),
             child: Container(
               width: 36,
               height: 36,
