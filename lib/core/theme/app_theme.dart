@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
-// ── Cores de categoria (fixas em todos os temas)
 class ForgeColors {
   static const musculacao = Color(0xFF3b82f6);
   static const musculacaoLight = Color(0xFF93c5fd);
@@ -40,7 +40,6 @@ class ForgeColors {
   }
 }
 
-// ── Definição de tema
 class ForgeTheme {
   final String id;
   final String name;
@@ -55,7 +54,6 @@ class ForgeTheme {
   });
 }
 
-// ── 7 temas disponíveis
 class ForgeThemes {
   static const teal = ForgeTheme(
       id: 'teal',
@@ -99,13 +97,13 @@ class ForgeThemes {
       all.firstWhere((t) => t.id == id, orElse: () => teal);
 }
 
-// ── Builder do ThemeData
 class AppTheme {
   static ThemeData build(ForgeTheme t) {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
       scaffoldBackgroundColor: t.bg,
+      fontFamily: GoogleFonts.dmSans().fontFamily,
       colorScheme: ColorScheme.dark(
         primary: t.accent,
         secondary: t.accent,
@@ -130,9 +128,10 @@ class AppTheme {
         selectedItemColor: t.accent,
         unselectedItemColor: ForgeColors.muted2,
       ),
-      textTheme: const TextTheme(
-        bodyMedium: TextStyle(color: ForgeColors.text, fontFamily: 'DMSans'),
-        bodySmall: TextStyle(color: ForgeColors.muted, fontFamily: 'DMSans'),
+      textTheme:
+          GoogleFonts.dmSansTextTheme(ThemeData.dark().textTheme).copyWith(
+        bodyMedium: GoogleFonts.dmSans(color: ForgeColors.text),
+        bodySmall: GoogleFonts.dmSans(color: ForgeColors.muted),
       ),
     );
   }
