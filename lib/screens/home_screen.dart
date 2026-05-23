@@ -31,7 +31,7 @@ class HomeScreen extends ConsumerWidget {
                 color: ForgeColors.musculacao,
                 colorLight: ForgeColors.musculacaoLight,
                 icon: LucideIcons.dumbbell,
-                onTap: () {},
+                onTap: () => context.push('/session?mode=musculacao'),
               ),
               const SizedBox(height: 10),
               _WorkoutTodayCard(
@@ -41,7 +41,7 @@ class HomeScreen extends ConsumerWidget {
                 color: ForgeColors.mobilidade,
                 colorLight: ForgeColors.mobilidadeLight,
                 icon: LucideIcons.leaf,
-                onTap: () {},
+                onTap: () => context.push('/session?mode=timed'),
               ),
               const SizedBox(height: 16),
               _StatsRow(),

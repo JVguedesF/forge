@@ -1,6 +1,6 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:flutter/material.dart';
 import 'shell.dart';
 import '../screens/home_screen.dart';
 import '../screens/library_screen.dart';
@@ -26,9 +26,24 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
           path: '/builder', builder: (c, s) => const WorkoutBuilderScreen()),
-      GoRoute(path: '/session', builder: (c, s) => const SessionScreen()),
       GoRoute(path: '/macro', builder: (c, s) => const MacroScreen()),
       GoRoute(path: '/settings', builder: (c, s) => const SettingsScreen()),
+      GoRoute(
+        path: '/session',
+        builder: (c, s) {
+          final mode = s.uri.queryParameters['mode'] ?? 'musculacao';
+          final sessionMode = switch (mode) {
+            'timed' => SessionMode.timed,
+            'corrida' => SessionMode.corrida,
+            _ => SessionMode.musculacao,
+          };
+          return SessionScreen(mode: sessionMode);
+        },
+      ),
+      GoRoute(path: '/session/form', builder: (c, s) => const RunFormScreen()),
+      GoRoute(
+          path: '/session/summary',
+          builder: (c, s) => const SessionSummaryScreen()),
     ],
   );
 });
