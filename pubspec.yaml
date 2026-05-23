@@ -1,8 +1,6 @@
 name: forge
 description: Training Hub Pessoal
-
 publish_to: "none"
-
 version: 1.0.0+1
 
 environment:
@@ -11,19 +9,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
-  # Banco de dados local
   isar: ^3.1.0
   isar_flutter_libs: ^3.1.0
   path_provider: ^2.1.0
-
-  # Estado
   flutter_riverpod: ^2.5.1
-
-  # Navegação
   go_router: ^13.0.0
-
-  # Fontes
   google_fonts: ^6.1.0
 
 dev_dependencies:
