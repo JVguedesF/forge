@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
+import 'package:go_router/go_router.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/theme_provider.dart';
-import 'package:go_router/go_router.dart';
+import '../core/helpers/forge_helpers.dart';
+import '../providers/workout_providers.dart';
+import '../data/models/workout.dart';
+import '../data/models/enums.dart';
 
 class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
@@ -30,29 +34,34 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
 
   @override
   Widget build(BuildContext context) {
-    final theme = ref.watch(themeProvider);
+    final theme = ref.watch(themeProvider).valueOrNull ?? ForgeThemes.teal;
+    final workoutsAsync = ref.watch(workoutsProvider);
+
     return Scaffold(
       backgroundColor: ForgeColors.bg,
       body: SafeArea(
-        child: Column(
-          children: [
-            _LibHeader(theme: theme),
-            _TabBar(controller: _tab, accent: theme.accent),
-            Expanded(
-              child: TabBarView(
-                controller: _tab,
-                children: [
-                  _WorkoutsTab(
-                      collapsed: _collapsed,
-                      onToggle: (cat) => setState(() => _collapsed.contains(cat)
-                          ? _collapsed.remove(cat)
-                          : _collapsed.add(cat))),
-                  const _ExercisesTab(),
-                ],
+        child: Column(children: [
+          _LibHeader(theme: theme),
+          _TabBarWidget(controller: _tab, accent: theme.accent),
+          Expanded(
+            child: TabBarView(controller: _tab, children: [
+              workoutsAsync.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (e, _) => Center(
+                    child: Text('Erro: $e',
+                        style: const TextStyle(color: ForgeColors.muted))),
+                data: (workouts) => _WorkoutsTab(
+                  workouts: workouts,
+                  collapsed: _collapsed,
+                  onToggle: (cat) => setState(() => _collapsed.contains(cat)
+                      ? _collapsed.remove(cat)
+                      : _collapsed.add(cat)),
+                ),
               ),
-            ),
-          ],
-        ),
+              const _ExercisesTab(),
+            ]),
+          ),
+        ]),
       ),
     );
   }
@@ -67,35 +76,32 @@ class _LibHeader extends StatelessWidget {
     return Container(
       color: ForgeColors.bg,
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-      child: Row(
-        children: [
-          const Expanded(
+      child: Row(children: [
+        const Expanded(
             child: Text('Biblioteca',
                 style: TextStyle(
                     fontFamily: 'BebasNeue',
                     fontSize: 38,
-                    color: ForgeColors.text)),
+                    color: ForgeColors.text))),
+        GestureDetector(
+          onTap: () => context.push('/builder'),
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+                color: theme.accent, borderRadius: BorderRadius.circular(10)),
+            child: Icon(LucideIcons.plus, color: theme.bg, size: 18),
           ),
-          GestureDetector(
-            onTap: () => context.push('/builder'),
-            child: Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                  color: theme.accent, borderRadius: BorderRadius.circular(10)),
-              child: Icon(LucideIcons.plus, color: theme.bg, size: 18),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ]),
     );
   }
 }
 
-class _TabBar extends StatelessWidget {
+class _TabBarWidget extends StatelessWidget {
   final TabController controller;
   final Color accent;
-  const _TabBar({required this.controller, required this.accent});
+  const _TabBarWidget({required this.controller, required this.accent});
 
   @override
   Widget build(BuildContext context) {
@@ -115,92 +121,60 @@ class _TabBar extends StatelessWidget {
   }
 }
 
-// ── Dados estáticos (substituir por Isar futuramente)
-class _WorkoutData {
-  final String name, type;
-  final int blocks, min;
-  final List<String> tags;
-  const _WorkoutData(this.name, this.type, this.blocks, this.min, this.tags);
-}
-
-class _CatMeta {
-  final String label;
-  final Color color, colorLight;
-  final IconData icon;
-  const _CatMeta(this.label, this.color, this.colorLight, this.icon);
-}
-
-final _cats = {
-  'musculacao': _CatMeta('Academia', ForgeColors.musculacao,
-      ForgeColors.musculacaoLight, LucideIcons.dumbbell),
-  'corrida': _CatMeta('Corrida', ForgeColors.corrida, ForgeColors.corridaLight,
-      LucideIcons.activity),
-  'drills': _CatMeta(
-      'Drills', ForgeColors.drills, ForgeColors.drillsLight, LucideIcons.zap),
-  'bola': _CatMeta(
-      'Bola', ForgeColors.bola, ForgeColors.bolaLight, LucideIcons.target),
-  'mobilidade': _CatMeta('Mobilidade', ForgeColors.mobilidade,
-      ForgeColors.mobilidadeLight, LucideIcons.leaf),
-};
-
-final _workouts = [
-  _WorkoutData('Upper A', 'musculacao', 6, 55, ['Composto', 'Isolado']),
-  _WorkoutData('Lower A', 'musculacao', 5, 60, ['Composto', 'Core']),
-  _WorkoutData('Upper B', 'musculacao', 6, 55, ['Composto', 'Potência']),
-  _WorkoutData('Lower B', 'musculacao', 5, 60, ['Core', 'Unilateral']),
-  _WorkoutData('Corrida Longa', 'corrida', 3, 0, ['Longa']),
-  _WorkoutData('Corrida Regeneração', 'corrida', 2, 0, ['Regeneração']),
-  _WorkoutData(
-      'Drills Iniciante', 'drills', 4, 45, ['Agilidade', 'Velocidade']),
-  _WorkoutData('Bola Intermediário', 'bola', 5, 50, ['Domínio', 'Drible']),
-  _WorkoutData(
-      'Mobilidade A', 'mobilidade', 4, 30, ['Alongamento', 'Fortalecimento']),
-  _WorkoutData('Mobilidade B', 'mobilidade', 4, 30, ['Cervical', 'Lombar']),
-];
-
 class _WorkoutsTab extends StatelessWidget {
+  final List<Workout> workouts;
   final Set<String> collapsed;
   final void Function(String) onToggle;
-  const _WorkoutsTab({required this.collapsed, required this.onToggle});
+  const _WorkoutsTab(
+      {required this.workouts,
+      required this.collapsed,
+      required this.onToggle});
 
   @override
   Widget build(BuildContext context) {
+    final cats = WorkoutType.values.where((t) => t != WorkoutType.custom);
     return ListView(
       padding: const EdgeInsets.only(bottom: 100),
-      children: _cats.entries.map((e) {
-        final cat = e.key;
-        final meta = e.value;
-        final ww = _workouts.where((w) => w.type == cat).toList();
+      children: cats.map((type) {
+        final ww = workouts.where((w) => w.type == type).toList();
         if (ww.isEmpty) return const SizedBox.shrink();
-        final isCollapsed = collapsed.contains(cat);
-        return Column(
-          children: [
-            _CatHeader(
-                meta: meta,
-                count: ww.length,
-                collapsed: isCollapsed,
-                onTap: () => onToggle(cat)),
-            if (!isCollapsed)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-                child: Column(
-                    children:
-                        ww.map((w) => _WorkoutCard(w: w, meta: meta)).toList()),
-              ),
-          ],
-        );
+        final key = type.name;
+        final isCollapsed = collapsed.contains(key);
+        final color = ForgeHelpers.workoutTypeColor(type);
+        final icon = ForgeHelpers.workoutTypeIcon(type);
+        final label = ForgeHelpers.workoutTypeLabel(type);
+
+        return Column(children: [
+          _CatHeader(
+              label: label,
+              color: color,
+              icon: icon,
+              count: ww.length,
+              collapsed: isCollapsed,
+              onTap: () => onToggle(key)),
+          if (!isCollapsed)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+              child: Column(
+                  children: ww.map((w) => _WorkoutCard(workout: w)).toList()),
+            ),
+        ]);
       }).toList(),
     );
   }
 }
 
 class _CatHeader extends StatelessWidget {
-  final _CatMeta meta;
+  final String label;
+  final Color color;
+  final IconData icon;
   final int count;
   final bool collapsed;
   final VoidCallback onTap;
   const _CatHeader(
-      {required this.meta,
+      {required this.label,
+      required this.color,
+      required this.icon,
       required this.count,
       required this.collapsed,
       required this.onTap});
@@ -214,203 +188,192 @@ class _CatHeader extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
         decoration: const BoxDecoration(
             border: Border(bottom: BorderSide(color: ForgeColors.border))),
-        child: Row(
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                  color: meta.color.withOpacity(.1),
-                  borderRadius: BorderRadius.circular(9)),
-              child: Icon(meta.icon, color: meta.color, size: 16),
-            ),
-            const SizedBox(width: 10),
-            Text(meta.label,
-                style: const TextStyle(
-                    fontFamily: 'BebasNeue',
-                    fontSize: 20,
-                    color: ForgeColors.text)),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                  color: meta.color.withOpacity(.1),
-                  borderRadius: BorderRadius.circular(20)),
-              child: Text('$count treinos',
-                  style: TextStyle(
-                      fontSize: 10,
-                      color: meta.color,
-                      fontWeight: FontWeight.w600)),
-            ),
-            const Spacer(),
-            Icon(
-                collapsed
-                    ? LucideIcons.chevron_right
-                    : LucideIcons.chevron_down,
-                color: ForgeColors.muted2,
-                size: 16),
-          ],
-        ),
+        child: Row(children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+                color: color.withOpacity(.1),
+                borderRadius: BorderRadius.circular(9)),
+            child: Icon(icon, color: color, size: 16),
+          ),
+          const SizedBox(width: 10),
+          Text(label,
+              style: const TextStyle(
+                  fontFamily: 'BebasNeue',
+                  fontSize: 20,
+                  color: ForgeColors.text)),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+                color: color.withOpacity(.1),
+                borderRadius: BorderRadius.circular(20)),
+            child: Text('$count treinos',
+                style: TextStyle(
+                    fontSize: 10, color: color, fontWeight: FontWeight.w600)),
+          ),
+          const Spacer(),
+          Icon(collapsed ? LucideIcons.chevron_right : LucideIcons.chevron_down,
+              color: ForgeColors.muted2, size: 16),
+        ]),
       ),
     );
   }
 }
 
 class _WorkoutCard extends StatelessWidget {
-  final _WorkoutData w;
-  final _CatMeta meta;
-  const _WorkoutCard({required this.w, required this.meta});
+  final Workout workout;
+  const _WorkoutCard({required this.workout});
+
+  static String _modeForType(WorkoutType type) => switch (type) {
+        WorkoutType.corrida => 'corrida',
+        WorkoutType.mobilidade => 'timed',
+        WorkoutType.drills => 'timed',
+        WorkoutType.bola => 'timed',
+        _ => 'musculacao',
+      };
 
   @override
   Widget build(BuildContext context) {
+    final color = ForgeHelpers.workoutTypeColor(workout.type);
+    final colorLight = ForgeHelpers.workoutTypeColorLight(workout.type);
+    final icon = ForgeHelpers.workoutTypeIcon(workout.type);
+    final mode = _modeForType(workout.type);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: ForgeColors.card,
-        border: Border.all(color: meta.color.withOpacity(.16)),
+        border: Border.all(color: color.withOpacity(.16)),
         borderRadius: BorderRadius.circular(14),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-                color: meta.color.withOpacity(.1),
-                borderRadius: BorderRadius.circular(12)),
-            child: Icon(meta.icon, color: meta.color, size: 19),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+              color: color.withOpacity(.1),
+              borderRadius: BorderRadius.circular(12)),
+          child: Icon(icon, color: color, size: 19),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(workout.name,
+              style: const TextStyle(
+                  fontFamily: 'BebasNeue',
+                  fontSize: 20,
+                  color: ForgeColors.text)),
+          Text(
+            '${workout.estimatedMinutes > 0 ? "${workout.estimatedMinutes} min" : "—"} · ${workout.blocks.length} blocos',
+            style: const TextStyle(fontSize: 11, color: ForgeColors.muted),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(w.name,
-                    style: const TextStyle(
-                        fontFamily: 'BebasNeue',
-                        fontSize: 20,
-                        color: ForgeColors.text)),
-                Text('${w.min > 0 ? "${w.min} min" : "—"} · ${w.blocks} blocos',
-                    style: const TextStyle(
-                        fontSize: 11, color: ForgeColors.muted)),
-                const SizedBox(height: 4),
-                Wrap(spacing: 4, children: w.tags.map((t) => _Tag(t)).toList()),
-              ],
+          const SizedBox(height: 4),
+          Wrap(spacing: 4, children: workout.tags.map((t) => _Tag(t)).toList()),
+        ])),
+        const SizedBox(width: 8),
+        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          Row(children: [
+            _SmallIconBtn(icon: LucideIcons.pencil, onTap: () {}),
+            const SizedBox(width: 2),
+            _SmallIconBtn(icon: LucideIcons.copy, onTap: () {}),
+          ]),
+          const SizedBox(height: 5),
+          GestureDetector(
+            onTap: () => context.push(
+              '/session?mode=$mode&id=${workout.id}&name=${Uri.encodeComponent(workout.name)}',
+            ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                  color: color.withOpacity(.1),
+                  borderRadius: BorderRadius.circular(8)),
+              child: Text('INICIAR',
+                  style: TextStyle(
+                      fontFamily: 'BebasNeue',
+                      fontSize: 13,
+                      color: colorLight)),
             ),
           ),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Row(
-                children: [
-                  _SmallIconBtn(icon: LucideIcons.pencil, onTap: () {}),
-                  const SizedBox(width: 2),
-                  _SmallIconBtn(icon: LucideIcons.copy, onTap: () {}),
-                ],
-              ),
-              const SizedBox(height: 5),
-              GestureDetector(
-                onTap: () {},
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                  decoration: BoxDecoration(
-                      color: meta.color.withOpacity(.1),
-                      borderRadius: BorderRadius.circular(8)),
-                  child: Text('INICIAR',
-                      style: TextStyle(
-                          fontFamily: 'BebasNeue',
-                          fontSize: 13,
-                          color: meta.color)),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+        ]),
+      ]),
     );
   }
 }
 
-class _ExercisesTab extends StatelessWidget {
+class _ExercisesTab extends ConsumerWidget {
   const _ExercisesTab();
 
   @override
-  Widget build(BuildContext context) {
-    final exercises = [
-      ('Supino Reto', 'Composto', ['Peito', 'Tri'], '100 kg', 'musculacao'),
-      ('Agachamento', 'Composto', ['Pernas'], '120 kg', 'musculacao'),
-      ('Deadlift', 'Composto', ['Posterior', 'Costas'], '140 kg', 'musculacao'),
-      ('OHP', 'Composto', ['Ombros'], '70 kg', 'musculacao'),
-      ('Remada Curvada', 'Composto', ['Costas'], '90 kg', 'musculacao'),
-      ('Crucifixo', 'Isolado', ['Peito'], '22 kg', 'musculacao'),
-      ('Prancha', 'Core', ['Core'], '2:30', 'musculacao'),
-      ('Embaixadinha', 'Habilidade', ['Domínio'], '87×', 'bola'),
-      ('Figura 4 Deitado', 'Timed', ['Quadril'], '—', 'mobilidade'),
-      ('Pigeon Pose', 'Timed', ['Quadril'], '—', 'mobilidade'),
-    ];
+  Widget build(BuildContext context, WidgetRef ref) {
+    final exercisesAsync = ref.watch(exercisesProvider);
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-      children: exercises.map((e) {
-        final meta = _cats[e.$5]!;
-        return GestureDetector(
-          onTap: () {},
-          child: Container(
+    return exercisesAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(
+          child: Text('Erro: $e',
+              style: const TextStyle(color: ForgeColors.muted))),
+      data: (exercises) => ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+        children: exercises.map((e) {
+          WorkoutType type = WorkoutType.musculacao;
+          if (e.tags.any((t) => ['Bola', 'Domínio', 'Drible'].contains(t)))
+            type = WorkoutType.bola;
+          else if (e.tags.any((t) =>
+              ['Mobilidade', 'Quadril', 'Cervical', 'Lombar'].contains(t)))
+            type = WorkoutType.mobilidade;
+
+          final color = ForgeHelpers.workoutTypeColor(type);
+          final icon = ForgeHelpers.workoutTypeIcon(type);
+
+          return Container(
             margin: const EdgeInsets.only(bottom: 8),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
             decoration: BoxDecoration(
-              color: ForgeColors.card,
-              border: Border.all(color: ForgeColors.border),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                      color: meta.color.withOpacity(.1),
-                      borderRadius: BorderRadius.circular(10)),
-                  child: Icon(meta.icon, color: meta.color, size: 17),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
+                color: ForgeColors.card,
+                border: Border.all(color: ForgeColors.border),
+                borderRadius: BorderRadius.circular(12)),
+            child: Row(children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                    color: color.withOpacity(.1),
+                    borderRadius: BorderRadius.circular(10)),
+                child: Icon(icon, color: color, size: 17),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(e.$1,
-                          style: const TextStyle(
-                              fontSize: 14,
-                              color: ForgeColors.text,
-                              fontWeight: FontWeight.w500)),
-                      Text('${e.$2} · ${e.$3.join(", ")}',
-                          style: const TextStyle(
-                              fontSize: 11, color: ForgeColors.muted)),
-                    ],
-                  ),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Text(e.name,
+                        style: const TextStyle(
+                            fontSize: 14,
+                            color: ForgeColors.text,
+                            fontWeight: FontWeight.w500)),
+                    Text('${e.type.name} · ${e.tags.join(", ")}',
+                        style: const TextStyle(
+                            fontSize: 11, color: ForgeColors.muted)),
+                  ])),
+              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                Text(
+                  e.defaultWeight != null
+                      ? '${e.defaultWeight!.toStringAsFixed(0)} kg'
+                      : '—',
+                  style: TextStyle(
+                      fontSize: 13, color: color, fontWeight: FontWeight.w600),
                 ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(e.$4,
-                        style: TextStyle(
-                            fontSize: 13,
-                            color: meta.color,
-                            fontWeight: FontWeight.w600)),
-                    const Text('PR',
-                        style:
-                            TextStyle(fontSize: 9, color: ForgeColors.muted)),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      }).toList(),
+                const Text('padrão',
+                    style: TextStyle(fontSize: 9, color: ForgeColors.muted)),
+              ]),
+            ]),
+          );
+        }).toList(),
+      ),
     );
   }
 }

@@ -22,89 +22,99 @@ const TrainingSessionSchema = CollectionSchema(
       name: r'avgPaceSeconds',
       type: IsarType.double,
     ),
-    r'completedSets': PropertySchema(
+    r'caloriesBurned': PropertySchema(
       id: 1,
+      name: r'caloriesBurned',
+      type: IsarType.long,
+    ),
+    r'completedSets': PropertySchema(
+      id: 2,
       name: r'completedSets',
       type: IsarType.long,
     ),
     r'durationSeconds': PropertySchema(
-      id: 2,
+      id: 3,
       name: r'durationSeconds',
       type: IsarType.long,
     ),
     r'endTime': PropertySchema(
-      id: 3,
+      id: 4,
       name: r'endTime',
       type: IsarType.dateTime,
     ),
     r'exercises': PropertySchema(
-      id: 4,
+      id: 5,
       name: r'exercises',
       type: IsarType.objectList,
       target: r'SessionExercise',
     ),
     r'kmPaces': PropertySchema(
-      id: 5,
+      id: 6,
       name: r'kmPaces',
       type: IsarType.doubleList,
     ),
     r'macroCycleId': PropertySchema(
-      id: 6,
+      id: 7,
       name: r'macroCycleId',
       type: IsarType.long,
     ),
     r'macroPhaseIndex': PropertySchema(
-      id: 7,
+      id: 8,
       name: r'macroPhaseIndex',
       type: IsarType.long,
     ),
     r'notes': PropertySchema(
-      id: 8,
+      id: 9,
       name: r'notes',
       type: IsarType.string,
     ),
     r'perceivedEffort': PropertySchema(
-      id: 9,
+      id: 10,
       name: r'perceivedEffort',
       type: IsarType.long,
     ),
+    r'prCount': PropertySchema(
+      id: 11,
+      name: r'prCount',
+      type: IsarType.long,
+    ),
     r'startTime': PropertySchema(
-      id: 10,
+      id: 12,
       name: r'startTime',
       type: IsarType.dateTime,
     ),
     r'totalActiveSeconds': PropertySchema(
-      id: 11,
+      id: 13,
       name: r'totalActiveSeconds',
       type: IsarType.long,
     ),
     r'totalDistanceKm': PropertySchema(
-      id: 12,
+      id: 14,
       name: r'totalDistanceKm',
       type: IsarType.double,
     ),
     r'totalVolume': PropertySchema(
-      id: 13,
+      id: 15,
       name: r'totalVolume',
       type: IsarType.double,
     ),
     r'workoutColorValue': PropertySchema(
-      id: 14,
+      id: 16,
       name: r'workoutColorValue',
       type: IsarType.long,
     ),
     r'workoutId': PropertySchema(
-      id: 15,
+      id: 17,
       name: r'workoutId',
       type: IsarType.long,
     ),
     r'workoutName': PropertySchema(
-      id: 16,
+      id: 18,
       name: r'workoutName',
       type: IsarType.string,
     ),
     r'workoutType': PropertySchema(
-      id: 17,
+      id: 19,
       name: r'workoutType',
       type: IsarType.string,
       enumMap: _TrainingSessionworkoutTypeEnumValueMap,
@@ -161,28 +171,30 @@ void _trainingSessionSerialize(
   Map<Type, List<int>> allOffsets,
 ) {
   writer.writeDouble(offsets[0], object.avgPaceSeconds);
-  writer.writeLong(offsets[1], object.completedSets);
-  writer.writeLong(offsets[2], object.durationSeconds);
-  writer.writeDateTime(offsets[3], object.endTime);
+  writer.writeLong(offsets[1], object.caloriesBurned);
+  writer.writeLong(offsets[2], object.completedSets);
+  writer.writeLong(offsets[3], object.durationSeconds);
+  writer.writeDateTime(offsets[4], object.endTime);
   writer.writeObjectList<SessionExercise>(
-    offsets[4],
+    offsets[5],
     allOffsets,
     SessionExerciseSchema.serialize,
     object.exercises,
   );
-  writer.writeDoubleList(offsets[5], object.kmPaces);
-  writer.writeLong(offsets[6], object.macroCycleId);
-  writer.writeLong(offsets[7], object.macroPhaseIndex);
-  writer.writeString(offsets[8], object.notes);
-  writer.writeLong(offsets[9], object.perceivedEffort);
-  writer.writeDateTime(offsets[10], object.startTime);
-  writer.writeLong(offsets[11], object.totalActiveSeconds);
-  writer.writeDouble(offsets[12], object.totalDistanceKm);
-  writer.writeDouble(offsets[13], object.totalVolume);
-  writer.writeLong(offsets[14], object.workoutColorValue);
-  writer.writeLong(offsets[15], object.workoutId);
-  writer.writeString(offsets[16], object.workoutName);
-  writer.writeString(offsets[17], object.workoutType.name);
+  writer.writeDoubleList(offsets[6], object.kmPaces);
+  writer.writeLong(offsets[7], object.macroCycleId);
+  writer.writeLong(offsets[8], object.macroPhaseIndex);
+  writer.writeString(offsets[9], object.notes);
+  writer.writeLong(offsets[10], object.perceivedEffort);
+  writer.writeLong(offsets[11], object.prCount);
+  writer.writeDateTime(offsets[12], object.startTime);
+  writer.writeLong(offsets[13], object.totalActiveSeconds);
+  writer.writeDouble(offsets[14], object.totalDistanceKm);
+  writer.writeDouble(offsets[15], object.totalVolume);
+  writer.writeLong(offsets[16], object.workoutColorValue);
+  writer.writeLong(offsets[17], object.workoutId);
+  writer.writeString(offsets[18], object.workoutName);
+  writer.writeString(offsets[19], object.workoutType.name);
 }
 
 TrainingSession _trainingSessionDeserialize(
@@ -193,31 +205,33 @@ TrainingSession _trainingSessionDeserialize(
 ) {
   final object = TrainingSession();
   object.avgPaceSeconds = reader.readDouble(offsets[0]);
-  object.completedSets = reader.readLong(offsets[1]);
-  object.durationSeconds = reader.readLong(offsets[2]);
-  object.endTime = reader.readDateTimeOrNull(offsets[3]);
+  object.caloriesBurned = reader.readLongOrNull(offsets[1]);
+  object.completedSets = reader.readLong(offsets[2]);
+  object.durationSeconds = reader.readLong(offsets[3]);
+  object.endTime = reader.readDateTimeOrNull(offsets[4]);
   object.exercises = reader.readObjectList<SessionExercise>(
-        offsets[4],
+        offsets[5],
         SessionExerciseSchema.deserialize,
         allOffsets,
         SessionExercise(),
       ) ??
       [];
   object.id = id;
-  object.kmPaces = reader.readDoubleList(offsets[5]) ?? [];
-  object.macroCycleId = reader.readLongOrNull(offsets[6]);
-  object.macroPhaseIndex = reader.readLongOrNull(offsets[7]);
-  object.notes = reader.readStringOrNull(offsets[8]);
-  object.perceivedEffort = reader.readLongOrNull(offsets[9]);
-  object.startTime = reader.readDateTime(offsets[10]);
-  object.totalActiveSeconds = reader.readLong(offsets[11]);
-  object.totalDistanceKm = reader.readDouble(offsets[12]);
-  object.totalVolume = reader.readDouble(offsets[13]);
-  object.workoutColorValue = reader.readLong(offsets[14]);
-  object.workoutId = reader.readLongOrNull(offsets[15]);
-  object.workoutName = reader.readString(offsets[16]);
+  object.kmPaces = reader.readDoubleList(offsets[6]) ?? [];
+  object.macroCycleId = reader.readLongOrNull(offsets[7]);
+  object.macroPhaseIndex = reader.readLongOrNull(offsets[8]);
+  object.notes = reader.readStringOrNull(offsets[9]);
+  object.perceivedEffort = reader.readLongOrNull(offsets[10]);
+  object.prCount = reader.readLong(offsets[11]);
+  object.startTime = reader.readDateTime(offsets[12]);
+  object.totalActiveSeconds = reader.readLong(offsets[13]);
+  object.totalDistanceKm = reader.readDouble(offsets[14]);
+  object.totalVolume = reader.readDouble(offsets[15]);
+  object.workoutColorValue = reader.readLong(offsets[16]);
+  object.workoutId = reader.readLongOrNull(offsets[17]);
+  object.workoutName = reader.readString(offsets[18]);
   object.workoutType = _TrainingSessionworkoutTypeValueEnumMap[
-          reader.readStringOrNull(offsets[17])] ??
+          reader.readStringOrNull(offsets[19])] ??
       WorkoutType.musculacao;
   return object;
 }
@@ -232,12 +246,14 @@ P _trainingSessionDeserializeProp<P>(
     case 0:
       return (reader.readDouble(offset)) as P;
     case 1:
-      return (reader.readLong(offset)) as P;
+      return (reader.readLongOrNull(offset)) as P;
     case 2:
       return (reader.readLong(offset)) as P;
     case 3:
-      return (reader.readDateTimeOrNull(offset)) as P;
+      return (reader.readLong(offset)) as P;
     case 4:
+      return (reader.readDateTimeOrNull(offset)) as P;
+    case 5:
       return (reader.readObjectList<SessionExercise>(
             offset,
             SessionExerciseSchema.deserialize,
@@ -245,31 +261,33 @@ P _trainingSessionDeserializeProp<P>(
             SessionExercise(),
           ) ??
           []) as P;
-    case 5:
-      return (reader.readDoubleList(offset) ?? []) as P;
     case 6:
-      return (reader.readLongOrNull(offset)) as P;
+      return (reader.readDoubleList(offset) ?? []) as P;
     case 7:
       return (reader.readLongOrNull(offset)) as P;
     case 8:
-      return (reader.readStringOrNull(offset)) as P;
-    case 9:
       return (reader.readLongOrNull(offset)) as P;
+    case 9:
+      return (reader.readStringOrNull(offset)) as P;
     case 10:
-      return (reader.readDateTime(offset)) as P;
+      return (reader.readLongOrNull(offset)) as P;
     case 11:
       return (reader.readLong(offset)) as P;
     case 12:
-      return (reader.readDouble(offset)) as P;
+      return (reader.readDateTime(offset)) as P;
     case 13:
-      return (reader.readDouble(offset)) as P;
-    case 14:
       return (reader.readLong(offset)) as P;
+    case 14:
+      return (reader.readDouble(offset)) as P;
     case 15:
-      return (reader.readLongOrNull(offset)) as P;
+      return (reader.readDouble(offset)) as P;
     case 16:
-      return (reader.readString(offset)) as P;
+      return (reader.readLong(offset)) as P;
     case 17:
+      return (reader.readLongOrNull(offset)) as P;
+    case 18:
+      return (reader.readString(offset)) as P;
+    case 19:
       return (_TrainingSessionworkoutTypeValueEnumMap[
               reader.readStringOrNull(offset)] ??
           WorkoutType.musculacao) as P;
@@ -452,6 +470,80 @@ extension TrainingSessionQueryFilter
         upper: upper,
         includeUpper: includeUpper,
         epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QAfterFilterCondition>
+      caloriesBurnedIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNull(
+        property: r'caloriesBurned',
+      ));
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QAfterFilterCondition>
+      caloriesBurnedIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNotNull(
+        property: r'caloriesBurned',
+      ));
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QAfterFilterCondition>
+      caloriesBurnedEqualTo(int? value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'caloriesBurned',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QAfterFilterCondition>
+      caloriesBurnedGreaterThan(
+    int? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'caloriesBurned',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QAfterFilterCondition>
+      caloriesBurnedLessThan(
+    int? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'caloriesBurned',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QAfterFilterCondition>
+      caloriesBurnedBetween(
+    int? lower,
+    int? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'caloriesBurned',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
       ));
     });
   }
@@ -1337,6 +1429,62 @@ extension TrainingSessionQueryFilter
   }
 
   QueryBuilder<TrainingSession, TrainingSession, QAfterFilterCondition>
+      prCountEqualTo(int value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'prCount',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QAfterFilterCondition>
+      prCountGreaterThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'prCount',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QAfterFilterCondition>
+      prCountLessThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'prCount',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QAfterFilterCondition>
+      prCountBetween(
+    int lower,
+    int upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'prCount',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QAfterFilterCondition>
       startTimeEqualTo(DateTime value) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.equalTo(
@@ -2013,6 +2161,20 @@ extension TrainingSessionQuerySortBy
   }
 
   QueryBuilder<TrainingSession, TrainingSession, QAfterSortBy>
+      sortByCaloriesBurned() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'caloriesBurned', Sort.asc);
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QAfterSortBy>
+      sortByCaloriesBurnedDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'caloriesBurned', Sort.desc);
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QAfterSortBy>
       sortByCompletedSets() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'completedSets', Sort.asc);
@@ -2105,6 +2267,19 @@ extension TrainingSessionQuerySortBy
       sortByPerceivedEffortDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'perceivedEffort', Sort.desc);
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QAfterSortBy> sortByPrCount() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'prCount', Sort.asc);
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QAfterSortBy>
+      sortByPrCountDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'prCount', Sort.desc);
     });
   }
 
@@ -2238,6 +2413,20 @@ extension TrainingSessionQuerySortThenBy
   }
 
   QueryBuilder<TrainingSession, TrainingSession, QAfterSortBy>
+      thenByCaloriesBurned() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'caloriesBurned', Sort.asc);
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QAfterSortBy>
+      thenByCaloriesBurnedDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'caloriesBurned', Sort.desc);
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QAfterSortBy>
       thenByCompletedSets() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'completedSets', Sort.asc);
@@ -2342,6 +2531,19 @@ extension TrainingSessionQuerySortThenBy
       thenByPerceivedEffortDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'perceivedEffort', Sort.desc);
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QAfterSortBy> thenByPrCount() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'prCount', Sort.asc);
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QAfterSortBy>
+      thenByPrCountDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'prCount', Sort.desc);
     });
   }
 
@@ -2468,6 +2670,13 @@ extension TrainingSessionQueryWhereDistinct
   }
 
   QueryBuilder<TrainingSession, TrainingSession, QDistinct>
+      distinctByCaloriesBurned() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'caloriesBurned');
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QDistinct>
       distinctByCompletedSets() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'completedSets');
@@ -2520,6 +2729,13 @@ extension TrainingSessionQueryWhereDistinct
       distinctByPerceivedEffort() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'perceivedEffort');
+    });
+  }
+
+  QueryBuilder<TrainingSession, TrainingSession, QDistinct>
+      distinctByPrCount() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'prCount');
     });
   }
 
@@ -2595,6 +2811,13 @@ extension TrainingSessionQueryProperty
     });
   }
 
+  QueryBuilder<TrainingSession, int?, QQueryOperations>
+      caloriesBurnedProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'caloriesBurned');
+    });
+  }
+
   QueryBuilder<TrainingSession, int, QQueryOperations> completedSetsProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'completedSets');
@@ -2651,6 +2874,12 @@ extension TrainingSessionQueryProperty
       perceivedEffortProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'perceivedEffort');
+    });
+  }
+
+  QueryBuilder<TrainingSession, int, QQueryOperations> prCountProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'prCount');
     });
   }
 

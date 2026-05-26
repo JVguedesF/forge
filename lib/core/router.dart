@@ -32,12 +32,18 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/session',
         builder: (c, s) {
           final mode = s.uri.queryParameters['mode'] ?? 'musculacao';
+          final workoutId = int.tryParse(s.uri.queryParameters['id'] ?? '');
+          final workoutName =
+              Uri.decodeComponent(s.uri.queryParameters['name'] ?? '');
           final sessionMode = switch (mode) {
             'timed' => SessionMode.timed,
             'corrida' => SessionMode.corrida,
             _ => SessionMode.musculacao,
           };
-          return SessionScreen(mode: sessionMode);
+          return SessionScreen(
+              mode: sessionMode,
+              workoutId: workoutId,
+              workoutName: workoutName);
         },
       ),
       GoRoute(path: '/session/form', builder: (c, s) => const RunFormScreen()),

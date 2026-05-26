@@ -15,3 +15,9 @@ final workoutsByTypeProvider =
     FutureProvider.family<List<Workout>, WorkoutType>((ref, type) {
   return ref.watch(workoutRepositoryProvider).getByType(type);
 });
+final exercisesProvider = StreamProvider((ref) {
+  return ref.watch(exerciseRepositoryProvider).watchAll();
+});
+final workoutByIdProvider = FutureProvider.family<Workout?, int>((ref, id) {
+  return ref.watch(workoutRepositoryProvider).getById(id);
+});

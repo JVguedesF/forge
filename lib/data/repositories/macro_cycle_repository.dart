@@ -23,6 +23,16 @@ class MacroCycleRepository {
     });
   }
 
+  Future<void> incrementCompletedSessions() async {
+    final cycle = await getActive();
+    if (cycle == null) return;
+    final phase =
+        cycle.phases.isNotEmpty ? cycle.phases[cycle.currentPhaseIndex] : null;
+    if (phase == null) return;
+    phase.completedSessions += 1;
+    await save(cycle);
+  }
+
   Stream<MacroCycle?> watchActive() => _db.macroCycles
       .filter()
       .isActiveEqualTo(true)

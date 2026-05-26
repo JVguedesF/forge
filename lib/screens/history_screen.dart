@@ -3,6 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/theme_provider.dart';
+import '../core/helpers/forge_helpers.dart';
+import '../providers/session_providers.dart';
+import '../data/models/training_session.dart';
+import '../data/models/enums.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
@@ -11,269 +15,316 @@ class HistoryScreen extends ConsumerStatefulWidget {
 }
 
 class _HistoryScreenState extends ConsumerState<HistoryScreen> {
-  int? _selectedDay;
-  String _filter = 'Todos';
-
-  final _trainedDays = const {
-    1: ['musculacao'],
-    2: ['mobilidade'],
-    4: ['corrida'],
-    5: ['drills', 'mobilidade'],
-    7: ['musculacao'],
-    9: ['bola'],
-    10: ['mobilidade'],
-    12: ['musculacao', 'corrida'],
-    14: ['drills'],
-    15: ['mobilidade'],
-    16: ['musculacao'],
-    18: ['corrida'],
-    19: ['drills', 'bola'],
-    20: ['musculacao', 'mobilidade'],
-    21: ['musculacao'],
-  };
-
-  final _catColors = const {
-    'musculacao': ForgeColors.musculacao,
-    'corrida': ForgeColors.corrida,
-    'drills': ForgeColors.drills,
-    'bola': ForgeColors.bola,
-    'mobilidade': ForgeColors.mobilidade,
-  };
-
-  final _catIcons = {
-    'musculacao': LucideIcons.dumbbell,
-    'corrida': LucideIcons.activity,
-    'drills': LucideIcons.zap,
-    'bola': LucideIcons.target,
-    'mobilidade': LucideIcons.leaf,
-  };
+  WorkoutType? _filter;
+  DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
 
   @override
   Widget build(BuildContext context) {
-    final theme = ref.watch(themeProvider);
+    final theme = ref.watch(themeProvider).valueOrNull ?? ForgeThemes.teal;
+    final sessionsAsync = ref.watch(sessionsProvider);
+
     return Scaffold(
       backgroundColor: ForgeColors.bg,
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 100),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Histórico',
-                  style: TextStyle(
-                      fontFamily: 'BebasNeue',
-                      fontSize: 38,
-                      color: ForgeColors.text)),
-              const SizedBox(height: 14),
-              _MonthStats(theme: theme),
-              const SizedBox(height: 16),
-              _SLabel('Maio 2025'),
-              _Calendar(
-                  trainedDays: _trainedDays,
-                  catColors: _catColors,
-                  selectedDay: _selectedDay,
-                  accent: theme.accent,
-                  onDayTap: (d) => setState(
-                      () => _selectedDay = _selectedDay == d ? null : d)),
-              const SizedBox(height: 16),
-              _FilterRow(
-                  selected: _filter,
-                  accent: theme.accent,
-                  onSelect: (f) => setState(() => _filter = f)),
-              const SizedBox(height: 14),
-              _HistoryList(catColors: _catColors, catIcons: _catIcons),
-            ],
-          ),
+        child: sessionsAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => Center(
+              child: Text('Erro: $e',
+                  style: const TextStyle(color: ForgeColors.muted))),
+          data: (sessions) {
+            final filtered = _filter == null
+                ? sessions
+                : sessions.where((s) => s.workoutType == _filter).toList();
+
+            // Sessões do mês atual
+            final monthSessions = sessions
+                .where((s) =>
+                    s.startTime.year == _month.year &&
+                    s.startTime.month == _month.month)
+                .toList();
+
+            // Map dia → tipos
+            final dayMap = <int, Set<WorkoutType>>{};
+            for (final s in monthSessions) {
+              dayMap.putIfAbsent(s.startTime.day, () => {}).add(s.workoutType);
+            }
+
+            // Agrupa por data (filtrado)
+            final grouped = <DateTime, List<TrainingSession>>{};
+            for (final s in filtered) {
+              final d = DateTime(
+                  s.startTime.year, s.startTime.month, s.startTime.day);
+              grouped.putIfAbsent(d, () => []).add(s);
+            }
+            final sortedDays = grouped.keys.toList()
+              ..sort((a, b) => b.compareTo(a));
+
+            return Column(children: [
+              _Header(),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+                  children: [
+                    _MonthStats(sessions: monthSessions, theme: theme),
+                    const SizedBox(height: 16),
+                    _MonthCalendar(
+                        month: _month,
+                        dayMap: dayMap,
+                        onPrev: () => setState(() =>
+                            _month = DateTime(_month.year, _month.month - 1)),
+                        onNext: () => setState(() =>
+                            _month = DateTime(_month.year, _month.month + 1))),
+                    const SizedBox(height: 16),
+                    _FilterRow(
+                        current: _filter,
+                        onSelect: (t) =>
+                            setState(() => _filter = _filter == t ? null : t)),
+                    const SizedBox(height: 14),
+                    if (sortedDays.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 40),
+                        child: Center(
+                            child: Text('Nenhuma sessão registrada',
+                                style: TextStyle(
+                                    color: ForgeColors.muted, fontSize: 14))),
+                      )
+                    else
+                      ...sortedDays.map((day) =>
+                          _DayGroup(day: day, sessions: grouped[day]!)),
+                  ],
+                ),
+              ),
+            ]);
+          },
         ),
       ),
     );
   }
+}
+
+class _Header extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+        child: const Align(
+          alignment: Alignment.centerLeft,
+          child: Text('Histórico',
+              style: TextStyle(
+                  fontFamily: 'BebasNeue',
+                  fontSize: 38,
+                  color: ForgeColors.text)),
+        ),
+      );
 }
 
 class _MonthStats extends StatelessWidget {
+  final List<TrainingSession> sessions;
   final ForgeTheme theme;
-  const _MonthStats({required this.theme});
+  const _MonthStats({required this.sessions, required this.theme});
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _Card(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                const _SLabel('Este mês'),
-                const SizedBox(height: 3),
-                const Text('18 sessões',
-                    style: TextStyle(
-                        fontFamily: 'BebasNeue',
-                        fontSize: 26,
-                        color: ForgeColors.text,
-                        letterSpacing: 0)),
-                const Text('14h 32min',
-                    style: TextStyle(fontSize: 11, color: ForgeColors.muted)),
-              ])),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _Card(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                const _SLabel('Streak'),
-                const SizedBox(height: 3),
-                Row(children: [
-                  const Icon(LucideIcons.flame,
-                      color: Color(0xFF00e5c8), size: 20),
-                  const SizedBox(width: 6),
-                  Text('7 dias',
-                      style: TextStyle(
-                          fontFamily: 'BebasNeue',
-                          fontSize: 26,
-                          color: theme.accent,
-                          letterSpacing: 0)),
-                ]),
-                const Text('Recorde: 14 dias',
-                    style: TextStyle(fontSize: 11, color: ForgeColors.muted)),
-              ])),
-        ),
-      ],
-    );
+    final totalMin =
+        sessions.fold<int>(0, (s, e) => s + e.durationSeconds) ~/ 60;
+    final totalKcal =
+        sessions.fold<int>(0, (s, e) => s + (e.caloriesBurned ?? 0));
+    final pr = sessions.fold<int>(0, (s, e) => s + e.prCount);
+
+    return Row(children: [
+      _StatBox(
+          value: sessions.length.toString(),
+          label: 'sessões',
+          color: theme.accent),
+      const SizedBox(width: 8),
+      _StatBox(value: '${totalMin}min', label: 'tempo total'),
+      const SizedBox(width: 8),
+      _StatBox(
+          value: totalKcal > 0 ? '${totalKcal}kcal' : '—', label: 'calorias'),
+      const SizedBox(width: 8),
+      _StatBox(value: pr.toString(), label: 'PRs'),
+    ]);
   }
 }
 
-class _Calendar extends StatelessWidget {
-  final Map<int, List<String>> trainedDays;
-  final Map<String, Color> catColors;
-  final int? selectedDay;
-  final Color accent;
-  final void Function(int) onDayTap;
-  const _Calendar(
-      {required this.trainedDays,
-      required this.catColors,
-      required this.selectedDay,
-      required this.accent,
-      required this.onDayTap});
+class _StatBox extends StatelessWidget {
+  final String value, label;
+  final Color? color;
+  const _StatBox({required this.value, required this.label, this.color});
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+              color: ForgeColors.card,
+              border: Border.all(color: ForgeColors.border),
+              borderRadius: BorderRadius.circular(12)),
+          child: Column(children: [
+            Text(value,
+                style: TextStyle(
+                    fontFamily: 'BebasNeue',
+                    fontSize: 22,
+                    color: color ?? ForgeColors.text,
+                    letterSpacing: 0)),
+            Text(label,
+                style: const TextStyle(fontSize: 9, color: ForgeColors.muted)),
+          ]),
+        ),
+      );
+}
+
+class _MonthCalendar extends StatelessWidget {
+  final DateTime month;
+  final Map<int, Set<WorkoutType>> dayMap;
+  final VoidCallback onPrev, onNext;
+  const _MonthCalendar(
+      {required this.month,
+      required this.dayMap,
+      required this.onPrev,
+      required this.onNext});
+
+  static const _months = [
+    'Janeiro',
+    'Fevereiro',
+    'Março',
+    'Abril',
+    'Maio',
+    'Junho',
+    'Julho',
+    'Agosto',
+    'Setembro',
+    'Outubro',
+    'Novembro',
+    'Dezembro'
+  ];
+  static const _days = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'];
 
   @override
   Widget build(BuildContext context) {
-    const dayLabels = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
-    final firstWeekday = DateTime(2025, 5, 1).weekday % 7;
+    final firstDay = DateTime(month.year, month.month, 1);
+    final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
+    final startWd = (firstDay.weekday - 1) % 7; // 0=Mon
+    final today = DateTime.now();
 
-    return _Card(
-      child: Column(
-        children: [
-          Row(
-              children: dayLabels
-                  .map((d) => Expanded(
-                      child: Center(
-                          child: Text(d,
-                              style: const TextStyle(
-                                  fontSize: 9,
-                                  color: ForgeColors.muted2,
-                                  fontWeight: FontWeight.w600)))))
-                  .toList()),
-          const SizedBox(height: 6),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 7,
-                mainAxisSpacing: 3,
-                crossAxisSpacing: 3,
-                childAspectRatio: 1),
-            itemCount: firstWeekday + 31,
-            itemBuilder: (_, i) {
-              if (i < firstWeekday) return const SizedBox.shrink();
-              final day = i - firstWeekday + 1;
-              final isToday = day == 21;
-              final isSelected = selectedDay == day;
-              final cats = trainedDays[day] ?? [];
-              return GestureDetector(
-                onTap: () => onDayTap(day),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? accent.withOpacity(.2)
-                        : isToday
-                            ? accent.withOpacity(.12)
-                            : Colors.transparent,
-                    borderRadius: BorderRadius.circular(7),
-                    border: (isToday || isSelected)
-                        ? Border.all(color: accent.withOpacity(.3))
-                        : null,
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text('$day',
-                          style: TextStyle(
-                              fontSize: 10,
-                              color: isToday || isSelected
-                                  ? accent
-                                  : cats.isNotEmpty
-                                      ? ForgeColors.text
-                                      : const Color(0xFF444444),
-                              fontWeight: isToday
-                                  ? FontWeight.w600
-                                  : FontWeight.normal)),
-                      if (cats.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Wrap(
-                            spacing: 1,
-                            children: cats
-                                .map((c) => Container(
-                                    width: 4,
-                                    height: 4,
-                                    decoration: BoxDecoration(
-                                        color: catColors[c],
-                                        shape: BoxShape.circle)))
-                                .toList()),
-                      ],
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ],
-      ),
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+          color: ForgeColors.card,
+          border: Border.all(color: ForgeColors.border),
+          borderRadius: BorderRadius.circular(14)),
+      child: Column(children: [
+        Row(children: [
+          GestureDetector(
+              onTap: onPrev,
+              child: const Icon(LucideIcons.chevron_left,
+                  color: ForgeColors.muted, size: 18)),
+          Expanded(
+              child: Center(
+                  child: Text('${_months[month.month - 1]} ${month.year}',
+                      style: const TextStyle(
+                          fontSize: 13,
+                          color: ForgeColors.text,
+                          fontWeight: FontWeight.w600)))),
+          GestureDetector(
+              onTap: onNext,
+              child: const Icon(LucideIcons.chevron_right,
+                  color: ForgeColors.muted, size: 18)),
+        ]),
+        const SizedBox(height: 10),
+        Row(
+            children: _days
+                .map((d) => Expanded(
+                    child: Center(
+                        child: Text(d,
+                            style: const TextStyle(
+                                fontSize: 10,
+                                color: ForgeColors.muted,
+                                fontWeight: FontWeight.w600)))))
+                .toList()),
+        const SizedBox(height: 6),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 7, mainAxisSpacing: 4, crossAxisSpacing: 4),
+          itemCount: startWd + daysInMonth,
+          itemBuilder: (_, i) {
+            if (i < startWd) return const SizedBox.shrink();
+            final day = i - startWd + 1;
+            final types = dayMap[day];
+            final isToday = today.year == month.year &&
+                today.month == month.month &&
+                today.day == day;
+
+            return Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text('$day',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isToday
+                            ? ForgeColors.text
+                            : (types != null
+                                ? ForgeColors.text
+                                : ForgeColors.muted2),
+                        fontWeight:
+                            isToday ? FontWeight.bold : FontWeight.normal,
+                      )),
+                  if (types != null) ...[
+                    const SizedBox(height: 2),
+                    Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: types
+                            .take(3)
+                            .map((t) => Container(
+                                  width: 4,
+                                  height: 4,
+                                  margin:
+                                      const EdgeInsets.symmetric(horizontal: 1),
+                                  decoration: BoxDecoration(
+                                      color: ForgeHelpers.workoutTypeColor(t),
+                                      shape: BoxShape.circle),
+                                ))
+                            .toList()),
+                  ] else
+                    const SizedBox(height: 6),
+                ]);
+          },
+        ),
+      ]),
     );
   }
 }
 
 class _FilterRow extends StatelessWidget {
-  final String selected;
-  final Color accent;
-  final void Function(String) onSelect;
-  const _FilterRow(
-      {required this.selected, required this.accent, required this.onSelect});
+  final WorkoutType? current;
+  final void Function(WorkoutType) onSelect;
+  const _FilterRow({required this.current, required this.onSelect});
 
   @override
   Widget build(BuildContext context) {
-    final filters = ['Todos', 'Musculação', 'Corrida', 'Mobilidade'];
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
-        children: filters.map((f) {
-          final active = f == selected;
+        children:
+            WorkoutType.values.where((t) => t != WorkoutType.custom).map((t) {
+          final active = current == t;
+          final color = ForgeHelpers.workoutTypeColor(t);
           return GestureDetector(
-            onTap: () => onSelect(f),
+            onTap: () => onSelect(t),
             child: Container(
-              margin: const EdgeInsets.only(right: 6),
-              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
               decoration: BoxDecoration(
-                color: ForgeColors.card,
-                border: Border.all(color: active ? accent : ForgeColors.border),
+                color: active ? color.withOpacity(.15) : ForgeColors.card,
+                border: Border.all(color: active ? color : ForgeColors.border),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: Text(f,
+              child: Text(ForgeHelpers.workoutTypeLabel(t),
                   style: TextStyle(
-                      fontSize: 11,
-                      color: active ? accent : ForgeColors.muted,
-                      fontWeight:
-                          active ? FontWeight.w600 : FontWeight.normal)),
+                      fontSize: 12,
+                      color: active ? color : ForgeColors.muted,
+                      fontWeight: FontWeight.w500)),
             ),
           );
         }).toList(),
@@ -282,107 +333,123 @@ class _FilterRow extends StatelessWidget {
   }
 }
 
-class _HistoryList extends StatelessWidget {
-  final Map<String, Color> catColors;
-  final Map<String, IconData> catIcons;
-  const _HistoryList({required this.catColors, required this.catIcons});
+class _DayGroup extends StatelessWidget {
+  final DateTime day;
+  final List<TrainingSession> sessions;
+  const _DayGroup({required this.day, required this.sessions});
+
+  static const _weekdays = [
+    'Segunda',
+    'Terça',
+    'Quarta',
+    'Quinta',
+    'Sexta',
+    'Sábado',
+    'Domingo'
+  ];
+  static const _months = [
+    'jan',
+    'fev',
+    'mar',
+    'abr',
+    'mai',
+    'jun',
+    'jul',
+    'ago',
+    'set',
+    'out',
+    'nov',
+    'dez'
+  ];
 
   @override
   Widget build(BuildContext context) {
-    final sessions = [
-      ('Hoje', 'musculacao', 'Upper A', '52 min · 09:15', '6.240 kg', '💪'),
-      ('Ontem', 'drills', 'Drills Iniciante', '41 min · 18:30', '', '💪'),
-      (
-        'Ontem',
-        'mobilidade',
-        'Mobilidade Rotina A',
-        '29 min · 07:00',
-        '',
-        '🔥'
+    final label =
+        '${_weekdays[day.weekday - 1]}, ${day.day} ${_months[day.month - 1]}';
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Text(label.toUpperCase(),
+            style: const TextStyle(
+                fontSize: 9,
+                color: ForgeColors.muted,
+                letterSpacing: 2,
+                fontWeight: FontWeight.w600)),
       ),
-      ('19 mai', 'musculacao', 'Lower A', '58 min · 17:00', '7.200 kg', '😊'),
-      ('19 mai', 'bola', 'Bola Intermediário', '50 min · 08:30', '', '😊'),
-      ('18 mai', 'corrida', 'Corrida Longa', '42 min · 07:00', '8.2 km', '🔥'),
-    ];
-
-    String? lastDate;
-    final widgets = <Widget>[];
-    for (final s in sessions) {
-      if (s.$1 != lastDate) {
-        if (lastDate != null) widgets.add(const SizedBox(height: 4));
-        widgets.add(Padding(
-            padding: const EdgeInsets.only(bottom: 8), child: _SLabel(s.$1)));
-        lastDate = s.$1;
-      }
-      final color = catColors[s.$2] ?? ForgeColors.muted;
-      final icon = catIcons[s.$2] ?? LucideIcons.activity;
-      widgets.add(Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-            color: ForgeColors.card,
-            border: Border.all(color: ForgeColors.border),
-            borderRadius: BorderRadius.circular(14)),
-        child: Row(children: [
-          Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                  color: color.withOpacity(.1),
-                  borderRadius: BorderRadius.circular(10)),
-              child: Icon(icon, color: color, size: 18)),
-          const SizedBox(width: 12),
-          Expanded(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                Text(s.$3,
-                    style: const TextStyle(
-                        fontSize: 13,
-                        color: ForgeColors.text,
-                        fontWeight: FontWeight.w500)),
-                Text(s.$4,
-                    style: const TextStyle(
-                        fontSize: 11, color: ForgeColors.muted)),
-              ])),
-          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            if (s.$5.isNotEmpty)
-              Text(s.$5,
-                  style: TextStyle(
-                      fontSize: 12, color: color, fontWeight: FontWeight.w600)),
-            Text(s.$6, style: const TextStyle(fontSize: 16)),
-          ]),
-        ]),
-      ));
-    }
-    return Column(
-        crossAxisAlignment: CrossAxisAlignment.start, children: widgets);
+      ...sessions.map((s) => _SessionCard(session: s)),
+    ]);
   }
 }
 
-class _SLabel extends StatelessWidget {
-  final String text;
-  const _SLabel(this.text);
-  @override
-  Widget build(BuildContext context) => Text(text.toUpperCase(),
-      style: const TextStyle(
-          fontSize: 9,
-          color: ForgeColors.muted,
-          letterSpacing: 2,
-          fontWeight: FontWeight.w600));
-}
+class _SessionCard extends StatelessWidget {
+  final TrainingSession session;
+  const _SessionCard({required this.session});
 
-class _Card extends StatelessWidget {
-  final Widget child;
-  const _Card({required this.child});
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(14),
-        margin: const EdgeInsets.only(bottom: 10),
-        decoration: BoxDecoration(
-            color: ForgeColors.card,
-            border: Border.all(color: ForgeColors.border),
-            borderRadius: BorderRadius.circular(14)),
-        child: child,
-      );
+  Widget build(BuildContext context) {
+    final color = ForgeHelpers.workoutTypeColor(session.workoutType);
+    final colorLight = ForgeHelpers.workoutTypeColorLight(session.workoutType);
+    final icon = ForgeHelpers.workoutTypeIcon(session.workoutType);
+    final dur = ForgeHelpers.formatDuration(session.durationSeconds);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: ForgeColors.card,
+        border: Border(
+            left: BorderSide(color: color, width: 3),
+            top: BorderSide(color: ForgeColors.border),
+            right: BorderSide(color: ForgeColors.border),
+            bottom: BorderSide(color: ForgeColors.border)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+              color: color.withOpacity(.1),
+              borderRadius: BorderRadius.circular(10)),
+          child: Icon(icon, color: color, size: 18),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(session.workoutName,
+              style: const TextStyle(
+                  fontFamily: 'BebasNeue',
+                  fontSize: 20,
+                  color: ForgeColors.text)),
+          Text('${ForgeHelpers.workoutTypeLabel(session.workoutType)} · $dur',
+              style: const TextStyle(fontSize: 11, color: ForgeColors.muted)),
+        ])),
+        if (session.prCount > 0)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+                color: colorLight.withOpacity(.12),
+                borderRadius: BorderRadius.circular(8)),
+            child: Text('${session.prCount} PR',
+                style: TextStyle(
+                    fontSize: 11,
+                    color: colorLight,
+                    fontWeight: FontWeight.w600)),
+          ),
+        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          Text(dur,
+              style: TextStyle(
+                  fontFamily: 'BebasNeue',
+                  fontSize: 20,
+                  color: colorLight,
+                  letterSpacing: 0)),
+          if (session.totalVolume != null && session.totalVolume! > 0)
+            Text('${session.totalVolume!.toStringAsFixed(0)} kg',
+                style: const TextStyle(fontSize: 10, color: ForgeColors.muted)),
+        ]),
+      ]),
+    );
+  }
 }

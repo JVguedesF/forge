@@ -4,13 +4,24 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/theme_provider.dart';
+import '../core/helpers/forge_helpers.dart';
+import '../providers/session_providers.dart';
+import '../providers/user_settings_provider.dart';
+import '../data/models/enums.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = ref.watch(themeProvider);
+    final theme = ref.watch(themeProvider).valueOrNull ?? ForgeThemes.teal;
+    final settingsAsync = ref.watch(userSettingsProvider);
+    final macroAsync = ref.watch(activeMacroCycleProvider);
+    final streakAsync = ref.watch(streakProvider);
+    final sessionsAsync = ref.watch(sessionsProvider);
+
+    final name = settingsAsync.valueOrNull?.name ?? 'Atleta';
+
     return Scaffold(
       backgroundColor: ForgeColors.bg,
       body: SafeArea(
@@ -19,35 +30,161 @@ class HomeScreen extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Header(theme: theme),
-              const SizedBox(height: 16),
-              _MacroCard(theme: theme),
-              const SizedBox(height: 16),
-              _SectionLabel('Treinos de hoje'),
-              _WorkoutTodayCard(
-                type: 'Musculação',
-                name: 'Upper A',
-                subtitle: '~55 min · 6 exercícios',
-                color: ForgeColors.musculacao,
-                colorLight: ForgeColors.musculacaoLight,
-                icon: LucideIcons.dumbbell,
-                onTap: () => context.push('/session?mode=musculacao'),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(ForgeHelpers.greetingByHour().toUpperCase(),
+                            style: const TextStyle(
+                                fontSize: 9,
+                                color: ForgeColors.muted,
+                                letterSpacing: 2,
+                                fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 2),
+                        Text(name,
+                            style: const TextStyle(
+                                fontFamily: 'BebasNeue',
+                                fontSize: 52,
+                                height: .9,
+                                color: ForgeColors.text)),
+                        const SizedBox(height: 3),
+                        Text(ForgeHelpers.todayLabel(),
+                            style: const TextStyle(
+                                fontSize: 11, color: ForgeColors.muted)),
+                      ]),
+                  const Spacer(),
+                  const SizedBox(height: 8),
+                  _IconBtn(
+                      icon: LucideIcons.settings,
+                      onTap: () => context.push('/settings')),
+                ],
               ),
-              const SizedBox(height: 10),
-              _WorkoutTodayCard(
-                type: 'Mobilidade',
-                name: 'Rotina A',
-                subtitle: '~30 min · Escoliose',
-                color: ForgeColors.mobilidade,
-                colorLight: ForgeColors.mobilidadeLight,
-                icon: LucideIcons.leaf,
-                onTap: () => context.push('/session?mode=timed'),
+              const SizedBox(height: 16),
+              macroAsync.when(
+                loading: () => const SizedBox(
+                    height: 80,
+                    child: Center(child: CircularProgressIndicator())),
+                error: (_, __) => const SizedBox.shrink(),
+                data: (cycle) {
+                  if (cycle == null) return _EmptyMacroCard(theme: theme);
+                  final phase = cycle.phases.isNotEmpty
+                      ? cycle.phases[cycle.currentPhaseIndex]
+                      : null;
+                  final pct = phase != null && phase.targetSessions > 0
+                      ? (phase.completedSessions / phase.targetSessions)
+                          .clamp(0.0, 1.0)
+                      : 0.0;
+                  return _MacroCard(
+                    theme: theme,
+                    cycleName: cycle.name,
+                    phaseName: phase?.name ?? '—',
+                    completed: phase?.completedSessions ?? 0,
+                    target: phase?.targetSessions ?? 0,
+                    pct: pct,
+                    onTap: () => context.push('/macro'),
+                  );
+                },
               ),
               const SizedBox(height: 16),
-              _StatsRow(),
+              macroAsync.when(
+                loading: () => const SizedBox.shrink(),
+                error: (_, __) => const SizedBox.shrink(),
+                data: (cycle) {
+                  if (cycle == null || cycle.phases.isEmpty)
+                    return const SizedBox.shrink();
+                  final phase = cycle.phases[cycle.currentPhaseIndex];
+                  final weekday = DateTime.now().weekday;
+                  final schedule = phase.weeklySchedule
+                      .where((d) => d.weekday == weekday)
+                      .toList();
+                  if (schedule.isEmpty) return const SizedBox.shrink();
+                  final names = schedule.first.workoutNames;
+                  if (names.isEmpty) return const SizedBox.shrink();
+
+                  return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const _SectionLabel('Treinos de hoje'),
+                        ...names.map((name) => _WorkoutTodayCard(name: name)),
+                      ]);
+                },
+              ),
               const SizedBox(height: 16),
-              _SectionLabel('Próximos dias'),
-              _NextDaysCard(),
+              Row(children: [
+                _StatCard(
+                  icon: LucideIcons.flame,
+                  iconColor: theme.accent,
+                  value: streakAsync.valueOrNull?.toString() ?? '0',
+                  label: 'streak',
+                ),
+                const SizedBox(width: 8),
+                _StatCard(
+                  icon: LucideIcons.layers,
+                  value: () {
+                    final sessions = sessionsAsync.valueOrNull ?? [];
+                    final now = DateTime.now();
+                    final weekStart =
+                        now.subtract(Duration(days: now.weekday - 1));
+                    return sessions
+                        .where((s) => s.startTime.isAfter(weekStart))
+                        .length
+                        .toString();
+                  }(),
+                  label: 'semana',
+                ),
+                const SizedBox(width: 8),
+                _StatCard(
+                  icon: LucideIcons.clock,
+                  value: () {
+                    final sessions = sessionsAsync.valueOrNull ?? [];
+                    final totalSec = sessions.fold<int>(
+                        0, (sum, s) => sum + s.durationSeconds);
+                    return (totalSec ~/ 3600).toString();
+                  }(),
+                  label: 'horas',
+                ),
+              ]),
+              const SizedBox(height: 16),
+              macroAsync.when(
+                loading: () => const SizedBox.shrink(),
+                error: (_, __) => const SizedBox.shrink(),
+                data: (cycle) {
+                  if (cycle == null || cycle.phases.isEmpty)
+                    return const SizedBox.shrink();
+                  final phase = cycle.phases[cycle.currentPhaseIndex];
+                  final now = DateTime.now();
+                  final nextDays =
+                      List.generate(3, (i) => now.add(Duration(days: i + 1)));
+                  final days = nextDays.map((d) {
+                    final wd = d.weekday;
+                    final sched = phase.weeklySchedule
+                        .where((s) => s.weekday == wd)
+                        .toList();
+                    final names = sched.isNotEmpty
+                        ? sched.first.workoutNames
+                        : <String>[];
+                    const dayLabels = [
+                      'Seg',
+                      'Ter',
+                      'Qua',
+                      'Qui',
+                      'Sex',
+                      'Sáb',
+                      'Dom'
+                    ];
+                    return (dayLabels[wd - 1], names);
+                  }).toList();
+
+                  return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const _SectionLabel('Próximos dias'),
+                        _NextDaysCard(days: days),
+                      ]);
+                },
+              ),
             ],
           ),
         ),
@@ -56,223 +193,261 @@ class HomeScreen extends ConsumerWidget {
   }
 }
 
-class _Header extends ConsumerWidget {
-  final ForgeTheme theme;
-  const _Header({required this.theme});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const _Label('Boa tarde'),
-            const SizedBox(height: 2),
-            const Text('Atleta',
-                style: TextStyle(
-                    fontFamily: 'BebasNeue',
-                    fontSize: 52,
-                    height: .9,
-                    color: ForgeColors.text)),
-            const SizedBox(height: 3),
-            Text(_todayLabel(),
-                style: const TextStyle(fontSize: 11, color: ForgeColors.muted)),
-          ],
-        ),
-        const Spacer(),
-        const SizedBox(height: 8),
-        _IconBtn(
-            icon: LucideIcons.settings, onTap: () => context.push('/settings')),
-      ],
-    );
-  }
-
-  String _todayLabel() {
-    final now = DateTime.now();
-    const dias = [
-      'Segunda',
-      'Terça',
-      'Quarta',
-      'Quinta',
-      'Sexta',
-      'Sábado',
-      'Domingo'
-    ];
-    const meses = [
-      'jan',
-      'fev',
-      'mar',
-      'abr',
-      'mai',
-      'jun',
-      'jul',
-      'ago',
-      'set',
-      'out',
-      'nov',
-      'dez'
-    ];
-    return '${dias[now.weekday - 1]} · ${now.day} de ${meses[now.month - 1]}';
-  }
-}
-
 class _MacroCard extends StatelessWidget {
   final ForgeTheme theme;
-  const _MacroCard({required this.theme});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => context.push('/macro'),
-      child: _Card(
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const _Label('Ciclo Base · Fase 1'),
-                    const SizedBox(height: 2),
-                    const Text('Semana 3 de 8',
-                        style: TextStyle(
-                            fontSize: 14,
-                            color: ForgeColors.text,
-                            fontWeight: FontWeight.w500)),
-                  ],
-                ),
-                const Spacer(),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    const Text('Sessões',
-                        style:
-                            TextStyle(fontSize: 9, color: ForgeColors.muted)),
-                    Text('14/24',
-                        style: TextStyle(
-                            fontFamily: 'BebasNeue',
-                            fontSize: 24,
-                            color: theme.accent,
-                            letterSpacing: 0)),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            _ProgressBar(value: .36, color: theme.accent),
-            const SizedBox(height: 7),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('24 sessões para Fase 2',
-                    style: TextStyle(fontSize: 10, color: ForgeColors.muted)),
-                Text('36%',
-                    style: TextStyle(
-                        fontSize: 10,
-                        color: theme.accent,
-                        fontWeight: FontWeight.w600)),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _WorkoutTodayCard extends StatelessWidget {
-  final String type, name, subtitle;
-  final Color color, colorLight;
-  final IconData icon;
+  final String cycleName, phaseName;
+  final int completed, target;
+  final double pct;
   final VoidCallback onTap;
-  const _WorkoutTodayCard(
-      {required this.type,
-      required this.name,
-      required this.subtitle,
-      required this.color,
-      required this.colorLight,
-      required this.icon,
+  const _MacroCard(
+      {required this.theme,
+      required this.cycleName,
+      required this.phaseName,
+      required this.completed,
+      required this.target,
+      required this.pct,
       required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
+      child: _Card(
+          child: Column(children: [
+        Row(children: [
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(cycleName.toUpperCase(),
+                style: const TextStyle(
+                    fontSize: 9,
+                    color: ForgeColors.muted,
+                    letterSpacing: 2,
+                    fontWeight: FontWeight.w600)),
+            const SizedBox(height: 2),
+            Text(phaseName,
+                style: const TextStyle(
+                    fontSize: 14,
+                    color: ForgeColors.text,
+                    fontWeight: FontWeight.w500)),
+          ]),
+          const Spacer(),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            const Text('Sessões',
+                style: TextStyle(fontSize: 9, color: ForgeColors.muted)),
+            Text('$completed/$target',
+                style: TextStyle(
+                    fontFamily: 'BebasNeue',
+                    fontSize: 24,
+                    color: theme.accent,
+                    letterSpacing: 0)),
+          ]),
+        ]),
+        const SizedBox(height: 10),
+        _ProgressBar(value: pct, color: theme.accent),
+        const SizedBox(height: 7),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Text('${target - completed} sessões restantes',
+              style: const TextStyle(fontSize: 10, color: ForgeColors.muted)),
+          Text('${(pct * 100).round()}%',
+              style: TextStyle(
+                  fontSize: 10,
+                  color: theme.accent,
+                  fontWeight: FontWeight.w600)),
+        ]),
+      ])),
+    );
+  }
+}
+
+class _EmptyMacroCard extends StatelessWidget {
+  final ForgeTheme theme;
+  const _EmptyMacroCard({required this.theme});
+  @override
+  Widget build(BuildContext context) {
+    return _Card(
+        child: Row(children: [
+      const Expanded(
+          child: Text('Nenhum ciclo ativo',
+              style: TextStyle(fontSize: 14, color: ForgeColors.muted))),
+      GestureDetector(
+        onTap: () => context.push('/macro'),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+              color: theme.accent, borderRadius: BorderRadius.circular(8)),
+          child: Text('CRIAR',
+              style: TextStyle(
+                  fontFamily: 'BebasNeue',
+                  fontSize: 13,
+                  color: theme.id == 'neon' ? Colors.black : ForgeColors.bg)),
+        ),
+      ),
+    ]));
+  }
+}
+
+class _WorkoutTodayCard extends StatelessWidget {
+  final String name;
+  const _WorkoutTodayCard({required this.name});
+
+  static String _modeForType(WorkoutType type) => switch (type) {
+        WorkoutType.corrida => 'corrida',
+        WorkoutType.mobilidade => 'timed',
+        WorkoutType.drills => 'timed',
+        WorkoutType.bola => 'timed',
+        _ => 'musculacao',
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    WorkoutType type = WorkoutType.custom;
+    final nl = name.toLowerCase();
+    if (nl.contains('upper') || nl.contains('lower'))
+      type = WorkoutType.musculacao;
+    else if (nl.contains('mob'))
+      type = WorkoutType.mobilidade;
+    else if (nl.contains('corrida'))
+      type = WorkoutType.corrida;
+    else if (nl.contains('drill'))
+      type = WorkoutType.drills;
+    else if (nl.contains('bola')) type = WorkoutType.bola;
+
+    final color = ForgeHelpers.workoutTypeColor(type);
+    final colorLight = ForgeHelpers.workoutTypeColorLight(type);
+    final icon = ForgeHelpers.workoutTypeIcon(type);
+    final label = ForgeHelpers.workoutTypeLabel(type);
+    final mode = _modeForType(type);
+
+    return GestureDetector(
+      onTap: () =>
+          context.push('/session?mode=$mode&name=${Uri.encodeComponent(name)}'),
       child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: ForgeColors.card,
           border: Border.all(color: color.withOpacity(.22)),
           borderRadius: BorderRadius.circular(14),
         ),
-        child: Row(
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                  color: color.withOpacity(.14),
-                  borderRadius: BorderRadius.circular(11)),
-              child: Icon(icon, color: colorLight, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
+        child: Row(children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+                color: color.withOpacity(.14),
+                borderRadius: BorderRadius.circular(11)),
+            child: Icon(icon, color: colorLight, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(type.toUpperCase(),
-                      style: TextStyle(
-                          fontSize: 9,
-                          color: colorLight,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 1)),
-                  Text(name,
-                      style: const TextStyle(
-                          fontFamily: 'BebasNeue',
-                          fontSize: 22,
-                          color: ForgeColors.text,
-                          height: 1.1)),
-                  Text(subtitle,
-                      style: const TextStyle(
-                          fontSize: 11, color: ForgeColors.muted)),
-                ],
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
-              decoration: BoxDecoration(
-                  color: color.withOpacity(.14),
-                  borderRadius: BorderRadius.circular(9)),
-              child: Text('INICIAR',
-                  style: TextStyle(
-                      fontFamily: 'BebasNeue',
-                      fontSize: 14,
-                      color: colorLight)),
-            ),
-          ],
-        ),
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text(label.toUpperCase(),
+                    style: TextStyle(
+                        fontSize: 9,
+                        color: colorLight,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1)),
+                Text(name,
+                    style: const TextStyle(
+                        fontFamily: 'BebasNeue',
+                        fontSize: 22,
+                        color: ForgeColors.text,
+                        height: 1.1)),
+              ])),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+            decoration: BoxDecoration(
+                color: color.withOpacity(.14),
+                borderRadius: BorderRadius.circular(9)),
+            child: Text('INICIAR',
+                style: TextStyle(
+                    fontFamily: 'BebasNeue', fontSize: 14, color: colorLight)),
+          ),
+        ]),
       ),
     );
   }
 }
 
-class _StatsRow extends StatelessWidget {
+class _NextDaysCard extends StatelessWidget {
+  final List<(String, List<String>)> days;
+  const _NextDaysCard({required this.days});
+
+  static const _typeColors = {
+    'upper': ForgeColors.musculacao,
+    'lower': ForgeColors.musculacao,
+    'mob': ForgeColors.mobilidade,
+    'corrida': ForgeColors.corrida,
+    'drill': ForgeColors.drills,
+    'bola': ForgeColors.bola,
+  };
+
+  Color _colorForName(String name) {
+    final n = name.toLowerCase();
+    for (final e in _typeColors.entries) if (n.contains(e.key)) return e.value;
+    return ForgeColors.muted;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _StatCard(
-            icon: LucideIcons.flame,
-            iconColor: const Color(0xFF00e5c8),
-            value: '7',
-            label: 'streak'),
-        const SizedBox(width: 8),
-        _StatCard(icon: LucideIcons.layers, value: '4', label: 'semana'),
-        const SizedBox(width: 8),
-        _StatCard(icon: LucideIcons.clock, value: '38', label: 'horas'),
-      ],
+    return Container(
+      decoration: BoxDecoration(
+          color: ForgeColors.card,
+          border: Border.all(color: ForgeColors.border),
+          borderRadius: BorderRadius.circular(14)),
+      child: Row(
+        children: days.asMap().entries.map((e) {
+          final last = e.key == days.length - 1;
+          final day = e.value.$1;
+          final names = e.value.$2;
+          return Expanded(
+              child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+                border: Border(
+                    right: last
+                        ? BorderSide.none
+                        : const BorderSide(color: ForgeColors.border))),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(day.toUpperCase(),
+                  style: const TextStyle(
+                      fontSize: 9,
+                      color: ForgeColors.muted,
+                      letterSpacing: 2,
+                      fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              if (names.isEmpty)
+                const Text('Descanso',
+                    style: TextStyle(fontSize: 10, color: ForgeColors.muted2))
+              else ...[
+                Row(
+                    children: names
+                        .map((n) => Container(
+                              width: 6,
+                              height: 6,
+                              margin: const EdgeInsets.only(right: 4),
+                              decoration: BoxDecoration(
+                                  color: _colorForName(n),
+                                  shape: BoxShape.circle),
+                            ))
+                        .toList()),
+                const SizedBox(height: 5),
+                ...names.asMap().entries.map((n) => Text(
+                      n.value,
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: n.key == 0
+                              ? ForgeColors.text
+                              : ForgeColors.muted),
+                      overflow: TextOverflow.ellipsis,
+                    )),
+              ],
+            ]),
+          ));
+        }).toList(),
+      ),
     );
   }
 }
@@ -288,16 +463,14 @@ class _StatCard extends StatelessWidget {
       this.iconColor});
 
   @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
-        decoration: BoxDecoration(
-            color: ForgeColors.card,
-            border: Border.all(color: ForgeColors.border),
-            borderRadius: BorderRadius.circular(14)),
-        child: Column(
-          children: [
+  Widget build(BuildContext context) => Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
+          decoration: BoxDecoration(
+              color: ForgeColors.card,
+              border: Border.all(color: ForgeColors.border),
+              borderRadius: BorderRadius.circular(14)),
+          child: Column(children: [
             Icon(icon, color: iconColor ?? ForgeColors.muted, size: 16),
             const SizedBox(height: 4),
             Text(value,
@@ -309,75 +482,9 @@ class _StatCard extends StatelessWidget {
                     height: 1)),
             Text(label,
                 style: const TextStyle(fontSize: 9, color: ForgeColors.muted)),
-          ],
+          ]),
         ),
-      ),
-    );
-  }
-}
-
-class _NextDaysCard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final days = [
-      _DayData('Qui', [ForgeColors.musculacao, ForgeColors.mobilidade],
-          ['Lower A', 'Mob B']),
-      _DayData('Sex', [ForgeColors.drills, ForgeColors.corrida],
-          ['Drills', 'Corrida']),
-      _DayData('Sáb', [const Color(0xFFf59e0b)], ['Upper B']),
-    ];
-    return Container(
-      decoration: BoxDecoration(
-          color: ForgeColors.card,
-          border: Border.all(color: ForgeColors.border),
-          borderRadius: BorderRadius.circular(14)),
-      child: Row(
-        children: days.asMap().entries.map((e) {
-          final last = e.key == days.length - 1;
-          return Expanded(
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                  border: Border(
-                      right: last
-                          ? BorderSide.none
-                          : const BorderSide(color: ForgeColors.border))),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _Label(e.value.day),
-                  const SizedBox(height: 6),
-                  Row(
-                      children: e.value.colors
-                          .map((c) => Container(
-                              width: 6,
-                              height: 6,
-                              margin: const EdgeInsets.only(right: 4),
-                              decoration: BoxDecoration(
-                                  color: c, shape: BoxShape.circle)))
-                          .toList()),
-                  const SizedBox(height: 5),
-                  ...e.value.names.asMap().entries.map((n) => Text(n.value,
-                      style: TextStyle(
-                          fontSize: 10,
-                          color: n.key == 0
-                              ? ForgeColors.text
-                              : ForgeColors.muted))),
-                ],
-              ),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-}
-
-class _DayData {
-  final String day;
-  final List<Color> colors;
-  final List<String> names;
-  const _DayData(this.day, this.colors, this.names);
+      );
 }
 
 class _SectionLabel extends StatelessWidget {
@@ -386,21 +493,12 @@ class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 10),
-        child: _Label(text),
-      );
-}
-
-class _Label extends StatelessWidget {
-  final String text;
-  const _Label(this.text);
-  @override
-  Widget build(BuildContext context) => Text(
-        text.toUpperCase(),
-        style: const TextStyle(
-            fontSize: 9,
-            color: ForgeColors.muted,
-            letterSpacing: 2,
-            fontWeight: FontWeight.w600),
+        child: Text(text.toUpperCase(),
+            style: const TextStyle(
+                fontSize: 9,
+                color: ForgeColors.muted,
+                letterSpacing: 2,
+                fontWeight: FontWeight.w600)),
       );
 }
 

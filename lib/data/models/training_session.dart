@@ -25,6 +25,8 @@ class TrainingSession {
   String? notes;
   int? macroCycleId;
   int? macroPhaseIndex;
+  int? caloriesBurned;
+  int prCount = 0;
 }
 
 @embedded

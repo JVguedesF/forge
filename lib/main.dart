@@ -18,13 +18,24 @@ class ForgeApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = ref.watch(themeProvider);
+    final themeAsync = ref.watch(themeProvider);
     final router = ref.watch(routerProvider);
-    return MaterialApp.router(
-      title: 'Forge',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.build(theme),
-      routerConfig: router,
+
+    return themeAsync.when(
+      loading: () => const MaterialApp(
+        home: Scaffold(backgroundColor: Color(0xFF0a0a0a)),
+        debugShowCheckedModeBanner: false,
+      ),
+      error: (_, __) => const MaterialApp(
+        home: Scaffold(backgroundColor: Color(0xFF0a0a0a)),
+        debugShowCheckedModeBanner: false,
+      ),
+      data: (theme) => MaterialApp.router(
+        title: 'Forge',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.build(theme),
+        routerConfig: router,
+      ),
     );
   }
 }

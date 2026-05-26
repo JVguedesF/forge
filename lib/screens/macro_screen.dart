@@ -4,475 +4,506 @@ import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:go_router/go_router.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/theme_provider.dart';
+import '../core/helpers/forge_helpers.dart';
+import '../providers/session_providers.dart';
+import '../data/models/macro_cycle.dart';
+import '../data/models/enums.dart';
 
-class MacroScreen extends ConsumerStatefulWidget {
+class MacroScreen extends ConsumerWidget {
   const MacroScreen({super.key});
-  @override
-  ConsumerState<MacroScreen> createState() => _MacroScreenState();
-}
-
-class _MacroScreenState extends ConsumerState<MacroScreen> {
-  final Set<int> _deload = {3, 7};
-
-  final _schedule = [
-    (
-      'Seg',
-      [('Upper A', ForgeColors.musculacao), ('Mob A', ForgeColors.mobilidade)]
-    ),
-    ('Ter', [('Lower A', ForgeColors.corrida)]),
-    ('Qua', [('Drills', ForgeColors.drills), ('Corrida', ForgeColors.corrida)]),
-    (
-      'Qui',
-      [('Upper B', Color(0xFFf59e0b)), ('Mob B', ForgeColors.mobilidade)]
-    ),
-    ('Sex', [('Bola', ForgeColors.bola), ('Lower B', ForgeColors.corrida)]),
-    ('Sáb', [('Corrida Longa', ForgeColors.corrida)]),
-    ('Dom', [('Descanso', ForgeColors.muted2)]),
-  ];
-
-  final _adherence = [
-    ('Semana 3', 5, 6, 83),
-    ('Semana 2', 6, 6, 100),
-    ('Semana 1', 5, 6, 83),
-  ];
-
-  final _muscles = [
-    ('Peito', 3, 4, ForgeColors.musculacao),
-    ('Costas', 3, 4, ForgeColors.musculacao),
-    ('Pernas', 2, 4, ForgeColors.corrida),
-    ('Ombros', 2, 4, ForgeColors.drills),
-    ('Bíceps', 2, 4, ForgeColors.mobilidade),
-    ('Tríceps', 3, 4, ForgeColors.mobilidade),
-    ('Core', 4, 4, ForgeColors.bola),
-  ];
 
   @override
-  Widget build(BuildContext context) {
-    final theme = ref.watch(themeProvider);
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = ref.watch(themeProvider).valueOrNull ?? ForgeThemes.teal;
+    final macroAsync = ref.watch(activeMacroCycleProvider);
+
     return Scaffold(
       backgroundColor: ForgeColors.bg,
       body: SafeArea(
-        child: Column(
-          children: [
-            _AppBar(theme: theme, onBack: () => context.pop()),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
-                child: Column(
+        child: Column(children: [
+          _AppBar(onBack: () => context.pop()),
+          Expanded(
+            child: macroAsync.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Center(
+                  child: Text('Erro: $e',
+                      style: const TextStyle(color: ForgeColors.muted))),
+              data: (cycle) {
+                if (cycle == null) return _EmptyState(theme: theme);
+                return _MacroContent(cycle: cycle, theme: theme);
+              },
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+class _MacroContent extends StatelessWidget {
+  final MacroCycle cycle;
+  final ForgeTheme theme;
+  const _MacroContent({required this.cycle, required this.theme});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+      children: [
+        _CycleHeader(cycle: cycle, theme: theme),
+        const SizedBox(height: 16),
+        _PhasesSection(cycle: cycle, theme: theme),
+        const SizedBox(height: 16),
+        if (cycle.phases.isNotEmpty) ...[
+          _WeeklyRoutine(
+              phase: cycle.phases[cycle.currentPhaseIndex], theme: theme),
+          const SizedBox(height: 16),
+          _PhaseGoals(
+              phase: cycle.phases[cycle.currentPhaseIndex], theme: theme),
+        ],
+      ],
+    );
+  }
+}
+
+class _CycleHeader extends StatelessWidget {
+  final MacroCycle cycle;
+  final ForgeTheme theme;
+  const _CycleHeader({required this.cycle, required this.theme});
+
+  @override
+  Widget build(BuildContext context) {
+    final phase =
+        cycle.phases.isNotEmpty ? cycle.phases[cycle.currentPhaseIndex] : null;
+    final pct = phase != null && phase.targetSessions > 0
+        ? (phase.completedSessions / phase.targetSessions).clamp(0.0, 1.0)
+        : 0.0;
+
+    final weeksElapsed = cycle.startDate != null
+        ? DateTime.now().difference(cycle.startDate!).inDays ~/ 7
+        : 0;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: ForgeColors.card,
+        border: Border.all(color: ForgeColors.border),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(
+              child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const _SLabel('Nome do ciclo'),
-                    _Field('Ciclo Base 2025'),
-                    const SizedBox(height: 4),
-                    const _SLabel('Fases'),
-                    _PhaseCard(
-                        name: 'Fase 1 — Base',
-                        sub: '8 semanas · 24 sessões · 65–75% 1RM',
-                        color: const Color(0xFF22c55e),
-                        active: true),
-                    const SizedBox(height: 8),
-                    _PhaseCard(
-                        name: 'Fase 2 — Intensidade',
-                        sub: '6 semanas · 20 sessões · 75–85% 1RM',
-                        color: const Color(0xFFf59e0b),
-                        active: false),
-                    const SizedBox(height: 8),
-                    _AddPhaseBtn(),
-                    const SizedBox(height: 4),
-                    const _SLabel('Rotina semanal — Fase 1'),
-                    ..._schedule.map(
-                        (d) => _DayRow(day: d.$1, items: d.$2, theme: theme)),
-                    const SizedBox(height: 8),
-                    const _SLabel('Semanas de Deload'),
-                    _DeloadGrid(
-                        total: 8,
-                        deload: _deload,
-                        onToggle: (i) => setState(() => _deload.contains(i)
-                            ? _deload.remove(i)
-                            : _deload.add(i))),
-                    const SizedBox(height: 16),
-                    const _SLabel('Aderência — semanas recentes'),
-                    ..._adherence.map((a) => _AdherenceRow(
-                        week: a.$1, done: a.$2, total: a.$3, pct: a.$4)),
-                    const SizedBox(height: 8),
-                    const _SLabel('Balanço muscular semanal'),
-                    _MuscleBalance(muscles: _muscles),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _AppBar extends StatelessWidget {
-  final ForgeTheme theme;
-  final VoidCallback onBack;
-  const _AppBar({required this.theme, required this.onBack});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
-      child: Row(
-        children: [
-          _XBtn(onTap: onBack, icon: LucideIcons.arrow_left),
-          const SizedBox(width: 12),
-          const Expanded(
-              child: Text('Macrociclo',
-                  style: TextStyle(
-                      fontFamily: 'BebasNeue',
-                      fontSize: 22,
-                      color: ForgeColors.text))),
-          GestureDetector(
-            onTap: () {},
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-              decoration: BoxDecoration(
-                  color: theme.accent, borderRadius: BorderRadius.circular(10)),
-              child: Text('SALVAR',
-                  style: TextStyle(
-                      fontFamily: 'BebasNeue',
-                      fontSize: 16,
-                      color:
-                          theme.id == 'neon' ? Colors.black : ForgeColors.bg)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PhaseCard extends StatelessWidget {
-  final String name, sub;
-  final Color color;
-  final bool active;
-  const _PhaseCard(
-      {required this.name,
-      required this.sub,
-      required this.color,
-      required this.active});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: ForgeColors.card,
-        border: Border.all(
-            color: active ? color.withOpacity(.3) : ForgeColors.border),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: [
-          Container(
-              width: 4,
-              height: 44,
-              decoration: BoxDecoration(
-                  color: color, borderRadius: BorderRadius.circular(4))),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(children: [
-                  Text(name,
-                      style: const TextStyle(
-                          fontFamily: 'BebasNeue',
-                          fontSize: 18,
-                          color: ForgeColors.text)),
-                  if (active) ...[
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                          color: color.withOpacity(.15),
-                          borderRadius: BorderRadius.circular(20)),
-                      child: Text('ATIVA',
-                          style: TextStyle(
-                              fontSize: 9,
-                              color: color,
-                              fontWeight: FontWeight.w600)),
-                    ),
-                  ],
-                ]),
-                Text(sub,
+                Text('CICLO ATIVO',
+                    style: TextStyle(
+                        fontSize: 9,
+                        color: theme.accent,
+                        letterSpacing: 2,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 2),
+                Text(cycle.name,
                     style: const TextStyle(
-                        fontSize: 11, color: ForgeColors.muted)),
-              ],
+                        fontFamily: 'BebasNeue',
+                        fontSize: 28,
+                        color: ForgeColors.text,
+                        height: 1)),
+                if (cycle.description != null)
+                  Text(cycle.description!,
+                      style: const TextStyle(
+                          fontSize: 11, color: ForgeColors.muted)),
+              ])),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Text('Semana $weeksElapsed',
+                style: TextStyle(
+                    fontFamily: 'BebasNeue',
+                    fontSize: 22,
+                    color: theme.accent,
+                    letterSpacing: 0)),
+            const Text('desde o início',
+                style: TextStyle(fontSize: 9, color: ForgeColors.muted)),
+          ]),
+        ]),
+        const SizedBox(height: 14),
+        if (phase != null) ...[
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text(phase.name,
+                style: const TextStyle(
+                    fontSize: 13,
+                    color: ForgeColors.text,
+                    fontWeight: FontWeight.w500)),
+            Text('${phase.completedSessions}/${phase.targetSessions} sessões',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: theme.accent,
+                    fontWeight: FontWeight.w600)),
+          ]),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: LinearProgressIndicator(
+              value: pct,
+              minHeight: 5,
+              backgroundColor: ForgeColors.border,
+              valueColor: AlwaysStoppedAnimation(theme.accent),
             ),
           ),
-          Icon(LucideIcons.chevron_right, color: ForgeColors.muted2, size: 16),
+          const SizedBox(height: 6),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text(
+                '${phase.targetSessions - phase.completedSessions} sessões restantes',
+                style: const TextStyle(fontSize: 10, color: ForgeColors.muted)),
+            Text('${(pct * 100).round()}%',
+                style: TextStyle(
+                    fontSize: 10,
+                    color: theme.accent,
+                    fontWeight: FontWeight.w600)),
+          ]),
         ],
-      ),
-    );
-  }
-}
-
-class _AddPhaseBtn extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 20),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: ForgeColors.card,
-        border: Border.all(color: ForgeColors.border, style: BorderStyle.solid),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Icon(LucideIcons.plus, color: ForgeColors.muted, size: 16),
-        const SizedBox(width: 8),
-        const Text('Adicionar fase',
-            style: TextStyle(fontSize: 13, color: ForgeColors.muted)),
       ]),
     );
   }
 }
 
-class _DayRow extends StatelessWidget {
-  final String day;
-  final List<(String, Color)> items;
+class _PhasesSection extends StatelessWidget {
+  final MacroCycle cycle;
   final ForgeTheme theme;
-  const _DayRow({required this.day, required this.items, required this.theme});
+  const _PhasesSection({required this.cycle, required this.theme});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-      decoration: BoxDecoration(
-          color: ForgeColors.card,
-          border: Border.all(color: ForgeColors.border),
-          borderRadius: BorderRadius.circular(12)),
-      child: Row(
-        children: [
-          SizedBox(
-              width: 32,
-              child: Text(day,
-                  style: const TextStyle(
-                      fontSize: 13,
-                      color: ForgeColors.text,
-                      fontWeight: FontWeight.w600),
-                  textAlign: TextAlign.center)),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Wrap(
-              spacing: 5,
-              runSpacing: 4,
-              children: items
-                  .map((w) => Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 3),
-                        decoration: BoxDecoration(
-                            color: w.$2.withOpacity(.1),
-                            border: Border.all(color: w.$2.withOpacity(.35)),
-                            borderRadius: BorderRadius.circular(20)),
-                        child: Text(w.$1,
-                            style: TextStyle(
-                                fontSize: 11,
-                                color: w.$2,
-                                fontWeight: FontWeight.w500)),
-                      ))
-                  .toList(),
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const _SLabel('Fases do ciclo'),
+      ...cycle.phases.asMap().entries.map((e) {
+        final i = e.key;
+        final phase = e.value;
+        final isActive = i == cycle.currentPhaseIndex;
+        final isPast = i < cycle.currentPhaseIndex;
+        final pct = phase.targetSessions > 0
+            ? (phase.completedSessions / phase.targetSessions).clamp(0.0, 1.0)
+            : 0.0;
+
+        final barColor = isPast
+            ? ForgeColors.muted2
+            : isActive
+                ? theme.accent
+                : ForgeColors.muted2;
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          decoration: BoxDecoration(
+            color: ForgeColors.card,
+            border: Border.all(
+                color: isActive
+                    ? theme.accent.withOpacity(.3)
+                    : ForgeColors.border),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Row(children: [
+            Container(
+              width: 4,
+              height: 80,
+              decoration: BoxDecoration(
+                color: barColor,
+                borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(14),
+                    bottomLeft: Radius.circular(14)),
+              ),
             ),
-          ),
-          Icon(LucideIcons.plus, color: ForgeColors.muted2, size: 13),
-        ],
-      ),
-    );
-  }
-}
-
-class _DeloadGrid extends StatelessWidget {
-  final int total;
-  final Set<int> deload;
-  final void Function(int) onToggle;
-  const _DeloadGrid(
-      {required this.total, required this.deload, required this.onToggle});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-          color: ForgeColors.card,
-          border: Border.all(color: ForgeColors.border),
-          borderRadius: BorderRadius.circular(12)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Marque as semanas com volume reduzido',
-              style: TextStyle(fontSize: 12, color: ForgeColors.muted)),
-          const SizedBox(height: 10),
-          GridView.count(
-            crossAxisCount: total,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: 6,
-            mainAxisSpacing: 6,
-            children: List.generate(total, (i) {
-              final isDeload = deload.contains(i);
-              return GestureDetector(
-                onTap: () => onToggle(i),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: isDeload
-                        ? ForgeColors.corrida.withOpacity(.15)
-                        : ForgeColors.card,
-                    border: Border.all(
-                        color: isDeload
-                            ? ForgeColors.corrida
-                            : ForgeColors.border),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Center(
-                    child: Text('S${i + 1}',
-                        style: TextStyle(
-                            fontSize: 12,
-                            color: isDeload
-                                ? ForgeColors.corrida
-                                : ForgeColors.muted,
-                            fontWeight: isDeload
-                                ? FontWeight.w600
-                                : FontWeight.normal)),
-                  ),
-                ),
-              );
-            }),
-          ),
-          const SizedBox(height: 8),
-          Text(
-              '${deload.map((i) => "S${i + 1}").join(" e ")} marcadas como deload',
-              style: const TextStyle(fontSize: 10, color: ForgeColors.muted)),
-        ],
-      ),
-    );
-  }
-}
-
-class _AdherenceRow extends StatelessWidget {
-  final String week;
-  final int done, total, pct;
-  const _AdherenceRow(
-      {required this.week,
-      required this.done,
-      required this.total,
-      required this.pct});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = pct == 100
-        ? const Color(0xFF22c55e)
-        : pct >= 80
-            ? const Color(0xFF00e5c8)
-            : const Color(0xFFf59e0b);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-          color: ForgeColors.card,
-          border: Border.all(color: ForgeColors.border),
-          borderRadius: BorderRadius.circular(10)),
-      child: Row(
-        children: [
-          Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-          const SizedBox(width: 10),
-          Expanded(
-              child: Text(week,
-                  style:
-                      const TextStyle(fontSize: 12, color: ForgeColors.text))),
-          Text('$done/$total treinos',
-              style: const TextStyle(fontSize: 12, color: ForgeColors.muted)),
-          const SizedBox(width: 8),
-          Text('$pct%',
-              style: TextStyle(
-                  fontSize: 12, color: color, fontWeight: FontWeight.w600)),
-        ],
-      ),
-    );
-  }
-}
-
-class _MuscleBalance extends StatelessWidget {
-  final List<(String, int, int, Color)> muscles;
-  const _MuscleBalance({required this.muscles});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-          color: ForgeColors.card,
-          border: Border.all(color: ForgeColors.border),
-          borderRadius: BorderRadius.circular(14)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Treinos por semana (rotina atual)',
-              style: TextStyle(fontSize: 12, color: ForgeColors.muted)),
-          const SizedBox(height: 12),
-          ...muscles.map((m) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Row(
-                  children: [
-                    SizedBox(
-                        width: 52,
-                        child: Text(m.$1,
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [
+                        if (isActive)
+                          Container(
+                            margin: const EdgeInsets.only(right: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                                color: theme.accent.withOpacity(.15),
+                                borderRadius: BorderRadius.circular(20)),
+                            child: Text('ATUAL',
+                                style: TextStyle(
+                                    fontSize: 8,
+                                    color: theme.accent,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 1)),
+                          ),
+                        Text(phase.name,
                             style: const TextStyle(
-                                fontSize: 11, color: ForgeColors.muted))),
-                    Expanded(
-                        child: ClipRRect(
-                      borderRadius: BorderRadius.circular(3),
-                      child: LinearProgressIndicator(
-                        value: m.$2 / m.$3,
-                        minHeight: 6,
-                        backgroundColor: ForgeColors.border,
-                        valueColor: AlwaysStoppedAnimation(m.$4),
-                      ),
-                    )),
-                    const SizedBox(width: 8),
-                    SizedBox(
-                        width: 20,
-                        child: Text('${m.$2}×',
+                                fontSize: 13,
+                                color: ForgeColors.text,
+                                fontWeight: FontWeight.w500)),
+                      ]),
+                      const SizedBox(height: 2),
+                      Text(phase.objective ?? '',
+                          style: const TextStyle(
+                              fontSize: 11, color: ForgeColors.muted)),
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        Expanded(
+                            child: ClipRRect(
+                          borderRadius: BorderRadius.circular(2),
+                          child: LinearProgressIndicator(
+                            value: pct,
+                            minHeight: 3,
+                            backgroundColor: ForgeColors.border,
+                            valueColor: AlwaysStoppedAnimation(barColor),
+                          ),
+                        )),
+                        const SizedBox(width: 8),
+                        Text(
+                            '${phase.completedSessions}/${phase.targetSessions}',
                             style: TextStyle(
-                                fontSize: 11,
-                                color: m.$4,
-                                fontWeight: FontWeight.w600),
-                            textAlign: TextAlign.right)),
-                  ],
-                ),
-              )),
-          const SizedBox(height: 4),
-          const Text('⚠ Pernas com menor frequência — considere equilibrar',
-              style: TextStyle(fontSize: 10, color: Color(0xFFf59e0b))),
-        ],
-      ),
-    );
+                                fontSize: 10,
+                                color: isActive
+                                    ? theme.accent
+                                    : ForgeColors.muted)),
+                      ]),
+                      const SizedBox(height: 4),
+                      Text(
+                          '${phase.durationWeeks} semanas · ${phase.intensityPercent}% intensidade · ${phase.recommendedSets}×${phase.recommendedReps}',
+                          style: const TextStyle(
+                              fontSize: 10, color: ForgeColors.muted2)),
+                    ]),
+              ),
+            ),
+          ]),
+        );
+      }),
+    ]);
   }
 }
 
-class _Field extends StatelessWidget {
-  final String value;
-  const _Field(this.value);
+class _WeeklyRoutine extends StatelessWidget {
+  final Phase phase;
+  final ForgeTheme theme;
+  const _WeeklyRoutine({required this.phase, required this.theme});
+
+  static const _dayLabels = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        margin: const EdgeInsets.only(bottom: 16),
+  Widget build(BuildContext context) {
+    final todayWd = DateTime.now().weekday;
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const _SLabel('Rotina semanal'),
+      Container(
         decoration: BoxDecoration(
+          color: ForgeColors.card,
+          border: Border.all(color: ForgeColors.border),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Column(
+          children: List.generate(7, (i) {
+            final wd = i + 1;
+            final sched =
+                phase.weeklySchedule.where((s) => s.weekday == wd).toList();
+            final names =
+                sched.isNotEmpty ? sched.first.workoutNames : <String>[];
+            final isToday = wd == todayWd;
+            final isLast = i == 6;
+
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              decoration: BoxDecoration(
+                color: isToday
+                    ? theme.accent.withOpacity(.06)
+                    : Colors.transparent,
+                border: isLast
+                    ? null
+                    : const Border(
+                        bottom: BorderSide(color: ForgeColors.border)),
+              ),
+              child: Row(children: [
+                SizedBox(
+                  width: 32,
+                  child: Text(
+                    _dayLabels[i],
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isToday ? theme.accent : ForgeColors.muted,
+                      fontWeight: isToday ? FontWeight.w700 : FontWeight.normal,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                if (names.isEmpty)
+                  const Text('Descanso',
+                      style: TextStyle(fontSize: 12, color: ForgeColors.muted2))
+                else
+                  Expanded(
+                      child: Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: names.map((n) {
+                            WorkoutType type = WorkoutType.musculacao;
+                            final nl = n.toLowerCase();
+                            if (nl.contains('mob'))
+                              type = WorkoutType.mobilidade;
+                            else if (nl.contains('corrida'))
+                              type = WorkoutType.corrida;
+                            else if (nl.contains('drill'))
+                              type = WorkoutType.drills;
+                            else if (nl.contains('bola'))
+                              type = WorkoutType.bola;
+
+                            final color = ForgeHelpers.workoutTypeColor(type);
+                            return Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 9, vertical: 3),
+                              decoration: BoxDecoration(
+                                  color: color.withOpacity(.12),
+                                  borderRadius: BorderRadius.circular(20)),
+                              child: Text(n,
+                                  style: TextStyle(
+                                      fontSize: 10,
+                                      color: color,
+                                      fontWeight: FontWeight.w500)),
+                            );
+                          }).toList())),
+              ]),
+            );
+          }),
+        ),
+      ),
+    ]);
+  }
+}
+
+class _PhaseGoals extends StatelessWidget {
+  final Phase phase;
+  final ForgeTheme theme;
+  const _PhaseGoals({required this.phase, required this.theme});
+
+  @override
+  Widget build(BuildContext context) {
+    if (phase.goals.isEmpty) return const SizedBox.shrink();
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const _SLabel('Metas da fase'),
+      ...phase.goals.map((goal) {
+        final pct = goal.target > 0
+            ? (goal.current / goal.target).clamp(0.0, 1.0)
+            : 0.0;
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
             color: ForgeColors.card,
             border: Border.all(color: ForgeColors.border),
-            borderRadius: BorderRadius.circular(12)),
-        child: Text(value,
-            style: const TextStyle(fontSize: 15, color: ForgeColors.text)),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Expanded(
+                  child: Text(goal.description,
+                      style: const TextStyle(
+                          fontSize: 13,
+                          color: ForgeColors.text,
+                          fontWeight: FontWeight.w500))),
+              Text(
+                  '${goal.current.toStringAsFixed(0)}/${goal.target.toStringAsFixed(0)} ${goal.unit}',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: theme.accent,
+                      fontWeight: FontWeight.w600)),
+            ]),
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: LinearProgressIndicator(
+                value: pct,
+                minHeight: 4,
+                backgroundColor: ForgeColors.border,
+                valueColor: AlwaysStoppedAnimation(theme.accent),
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text('${(pct * 100).round()}% concluído',
+                style: const TextStyle(fontSize: 10, color: ForgeColors.muted)),
+          ]),
+        );
+      }),
+    ]);
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  final ForgeTheme theme;
+  const _EmptyState({required this.theme});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+      const Icon(LucideIcons.calendar, color: ForgeColors.muted2, size: 48),
+      const SizedBox(height: 16),
+      const Text('Nenhum ciclo ativo',
+          style: TextStyle(
+              fontFamily: 'BebasNeue', fontSize: 28, color: ForgeColors.text)),
+      const SizedBox(height: 8),
+      const Text('Crie um ciclo para organizar\nseus treinos por fase',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 13, color: ForgeColors.muted)),
+      const SizedBox(height: 24),
+      GestureDetector(
+        onTap: () {},
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          decoration: BoxDecoration(
+              color: theme.accent, borderRadius: BorderRadius.circular(12)),
+          child: Text('CRIAR CICLO',
+              style: TextStyle(
+                  fontFamily: 'BebasNeue',
+                  fontSize: 16,
+                  color: theme.id == 'neon' ? Colors.black : ForgeColors.bg)),
+        ),
+      ),
+    ]));
+  }
+}
+
+class _AppBar extends StatelessWidget {
+  final VoidCallback onBack;
+  const _AppBar({required this.onBack});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+        child: Row(children: [
+          _XBtn(onTap: onBack),
+          const SizedBox(width: 12),
+          const Text('Macro Ciclo',
+              style: TextStyle(
+                  fontFamily: 'BebasNeue',
+                  fontSize: 22,
+                  color: ForgeColors.text)),
+        ]),
+      );
+}
+
+class _XBtn extends StatelessWidget {
+  final VoidCallback onTap;
+  const _XBtn({required this.onTap});
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+              border: Border.all(color: ForgeColors.border),
+              shape: BoxShape.circle),
+          child: const Icon(LucideIcons.arrow_left,
+              color: ForgeColors.muted, size: 16),
+        ),
       );
 }
 
@@ -488,23 +519,5 @@ class _SLabel extends StatelessWidget {
                 color: ForgeColors.muted,
                 letterSpacing: 2,
                 fontWeight: FontWeight.w600)),
-      );
-}
-
-class _XBtn extends StatelessWidget {
-  final VoidCallback onTap;
-  final IconData icon;
-  const _XBtn({required this.onTap, required this.icon});
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-              border: Border.all(color: ForgeColors.border),
-              shape: BoxShape.circle),
-          child: Icon(icon, color: ForgeColors.muted, size: 16),
-        ),
       );
 }

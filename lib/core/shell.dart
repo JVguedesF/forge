@@ -19,7 +19,7 @@ class AppShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = ref.watch(themeProvider);
+    final theme = ref.watch(themeProvider).valueOrNull ?? ForgeThemes.teal;
     final idx = _currentIndex(context);
     return Scaffold(
       backgroundColor: ForgeColors.bg,
