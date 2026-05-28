@@ -44,7 +44,8 @@ class _LiveBlock {
 }
 
 class WorkoutBuilderScreen extends ConsumerStatefulWidget {
-  const WorkoutBuilderScreen({super.key});
+  final int? editWorkoutId;
+  const WorkoutBuilderScreen({super.key, this.editWorkoutId});
   @override
   ConsumerState<WorkoutBuilderScreen> createState() =>
       _WorkoutBuilderScreenState();
@@ -56,6 +57,47 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
   final Set<String> _selectedTags = {};
   final List<_LiveBlock> _blocks = [];
   bool _saving = false;
+  bool _loaded = false;
+  int? _editingId;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.editWorkoutId != null) {
+      _editingId = widget.editWorkoutId;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _loadExisting());
+    }
+  }
+
+  Future<void> _loadExisting() async {
+    final workout =
+        await ref.read(workoutRepositoryProvider).getById(_editingId!);
+    if (workout == null || !mounted) return;
+    setState(() {
+      _nameCtrl.text = workout.name;
+      _type = workout.type;
+      _selectedTags.addAll(workout.tags);
+      _blocks.clear();
+      for (final b in workout.blocks) {
+        _blocks.add(_LiveBlock(
+          isCircuit: b.isCircuit,
+          circuitName: b.circuitName ?? 'Super-set',
+          sets: b.sets,
+          restSeconds: b.restAfterSeconds,
+          exercises: b.exercises
+              .map((e) => _LiveExercise(
+                    exerciseId: e.exerciseId,
+                    name: e.exerciseName,
+                    reps: e.reps,
+                    suggestedWeight: e.suggestedWeight,
+                    type: e.type,
+                  ))
+              .toList(),
+        ));
+      }
+      _loaded = true;
+    });
+  }
 
   @override
   void dispose() {
@@ -122,6 +164,8 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
         return block;
       }).toList();
 
+    // Preserva o ID ao editar treino existente
+    if (_editingId != null) workout.id = _editingId;
     await ref.read(workoutRepositoryProvider).save(workout);
     if (mounted) context.pop();
   }
@@ -218,8 +262,11 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
             child: Row(children: [
               _XBtn(onTap: () => context.pop(), icon: LucideIcons.x),
               const SizedBox(width: 12),
-              const Expanded(
-                  child: Text('Novo Treino',
+              Expanded(
+                  child: Text(
+                      widget.editWorkoutId != null
+                          ? 'Editar Treino'
+                          : 'Novo Treino',
                       style: TextStyle(
                           fontFamily: 'BebasNeue',
                           fontSize: 22,

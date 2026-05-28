@@ -25,7 +25,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         ],
       ),
       GoRoute(
-          path: '/builder', builder: (c, s) => const WorkoutBuilderScreen()),
+        path: '/builder',
+        builder: (c, s) {
+          final id = int.tryParse(s.uri.queryParameters['id'] ?? '');
+          return WorkoutBuilderScreen(editWorkoutId: id);
+        },
+      ),
       GoRoute(path: '/macro', builder: (c, s) => const MacroScreen()),
       GoRoute(path: '/settings', builder: (c, s) => const SettingsScreen()),
       GoRoute(

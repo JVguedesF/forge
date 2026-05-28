@@ -16,9 +16,35 @@ final activeMacroCycleProvider = StreamProvider((ref) {
   return ref.watch(macroCycleRepositoryProvider).watchActive();
 });
 
-final streakProvider = FutureProvider<int>((ref) {
-  return ref.watch(sessionRepositoryProvider).getStreakDays();
+// Streak derivado direto do stream — atualiza automaticamente após salvar sessão
+final streakProvider = Provider<int>((ref) {
+  final sessionsAsync = ref.watch(sessionsProvider);
+  return sessionsAsync.when(
+    data: (sessions) => _calcStreak(sessions),
+    loading: () => 0,
+    error: (_, __) => 0,
+  );
 });
+
+int _calcStreak(List<TrainingSession> sessions) {
+  if (sessions.isEmpty) return 0;
+  int streak = 0;
+  DateTime? last;
+  for (final s in sessions) {
+    final day = DateTime(s.startTime.year, s.startTime.month, s.startTime.day);
+    if (last == null) {
+      last = day;
+      streak = 1;
+      continue;
+    }
+    final diff = last.difference(day).inDays;
+    if (diff == 1) {
+      streak++;
+      last = day;
+    } else if (diff > 1) break;
+  }
+  return streak;
+}
 
 final monthSessionsProvider =
     FutureProvider.family<List<TrainingSession>, (int, int)>((ref, ym) {

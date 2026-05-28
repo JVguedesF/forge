@@ -17,7 +17,7 @@ class HomeScreen extends ConsumerWidget {
     final theme = ref.watch(themeProvider).valueOrNull ?? ForgeThemes.teal;
     final settingsAsync = ref.watch(userSettingsProvider);
     final macroAsync = ref.watch(activeMacroCycleProvider);
-    final streakAsync = ref.watch(streakProvider);
+    final streak = ref.watch(streakProvider);
     final sessionsAsync = ref.watch(sessionsProvider);
 
     final name = settingsAsync.valueOrNull?.name ?? 'Atleta';
@@ -116,7 +116,7 @@ class HomeScreen extends ConsumerWidget {
                 _StatCard(
                   icon: LucideIcons.flame,
                   iconColor: theme.accent,
-                  value: streakAsync.valueOrNull?.toString() ?? '0',
+                  value: streak.toString(),
                   label: 'streak',
                 ),
                 const SizedBox(width: 8),

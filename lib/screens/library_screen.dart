@@ -7,6 +7,7 @@ import '../core/theme/theme_provider.dart';
 import '../core/helpers/forge_helpers.dart';
 import '../providers/workout_providers.dart';
 import '../data/models/workout.dart';
+import '../data/models/exercise.dart';
 import '../data/models/enums.dart';
 
 class LibraryScreen extends ConsumerStatefulWidget {
@@ -222,7 +223,7 @@ class _CatHeader extends StatelessWidget {
   }
 }
 
-class _WorkoutCard extends StatelessWidget {
+class _WorkoutCard extends ConsumerWidget {
   final Workout workout;
   const _WorkoutCard({required this.workout});
 
@@ -234,8 +235,38 @@ class _WorkoutCard extends StatelessWidget {
         _ => 'musculacao',
       };
 
+  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: ForgeColors.card,
+        title: const Text('Deletar treino',
+            style: TextStyle(
+                fontFamily: 'BebasNeue',
+                fontSize: 22,
+                color: ForgeColors.text)),
+        content: Text(
+            'Deletar "${workout.name}"? Esta ação não pode ser desfeita.',
+            style: const TextStyle(fontSize: 13, color: ForgeColors.muted)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar',
+                  style: TextStyle(color: ForgeColors.muted))),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Deletar',
+                  style: TextStyle(color: Color(0xFFef4444)))),
+        ],
+      ),
+    );
+    if (confirm == true && workout.id != null) {
+      await ref.read(workoutRepositoryProvider).delete(workout.id!);
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final color = ForgeHelpers.workoutTypeColor(workout.type);
     final colorLight = ForgeHelpers.workoutTypeColorLight(workout.type);
     final icon = ForgeHelpers.workoutTypeIcon(workout.type);
@@ -277,9 +308,15 @@ class _WorkoutCard extends StatelessWidget {
         const SizedBox(width: 8),
         Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
           Row(children: [
-            _SmallIconBtn(icon: LucideIcons.pencil, onTap: () {}),
+            // Botão editar — abre WorkoutBuilder com ID
+            _SmallIconBtn(
+                icon: LucideIcons.pencil,
+                onTap: () => context.push('/builder?id=${workout.id}')),
             const SizedBox(width: 2),
-            _SmallIconBtn(icon: LucideIcons.copy, onTap: () {}),
+            // Botão deletar
+            _SmallIconBtn(
+                icon: LucideIcons.trash_2,
+                onTap: () => _confirmDelete(context, ref)),
           ]),
           const SizedBox(height: 5),
           GestureDetector(
@@ -304,6 +341,7 @@ class _WorkoutCard extends StatelessWidget {
   }
 }
 
+// ── Aba Exercícios com editar/deletar
 class _ExercisesTab extends ConsumerWidget {
   const _ExercisesTab();
 
@@ -318,64 +356,183 @@ class _ExercisesTab extends ConsumerWidget {
               style: const TextStyle(color: ForgeColors.muted))),
       data: (exercises) => ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-        children: exercises.map((e) {
-          WorkoutType type = WorkoutType.musculacao;
-          if (e.tags.any((t) => ['Bola', 'Domínio', 'Drible'].contains(t)))
-            type = WorkoutType.bola;
-          else if (e.tags.any((t) =>
-              ['Mobilidade', 'Quadril', 'Cervical', 'Lombar'].contains(t)))
-            type = WorkoutType.mobilidade;
-
-          final color = ForgeHelpers.workoutTypeColor(type);
-          final icon = ForgeHelpers.workoutTypeIcon(type);
-
-          return Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-            decoration: BoxDecoration(
-                color: ForgeColors.card,
-                border: Border.all(color: ForgeColors.border),
-                borderRadius: BorderRadius.circular(12)),
-            child: Row(children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                    color: color.withOpacity(.1),
-                    borderRadius: BorderRadius.circular(10)),
-                child: Icon(icon, color: color, size: 17),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                    Text(e.name,
-                        style: const TextStyle(
-                            fontSize: 14,
-                            color: ForgeColors.text,
-                            fontWeight: FontWeight.w500)),
-                    Text('${e.type.name} · ${e.tags.join(", ")}',
-                        style: const TextStyle(
-                            fontSize: 11, color: ForgeColors.muted)),
-                  ])),
-              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                Text(
-                  e.defaultWeight != null
-                      ? '${e.defaultWeight!.toStringAsFixed(0)} kg'
-                      : '—',
-                  style: TextStyle(
-                      fontSize: 13, color: color, fontWeight: FontWeight.w600),
-                ),
-                const Text('padrão',
-                    style: TextStyle(fontSize: 9, color: ForgeColors.muted)),
-              ]),
-            ]),
-          );
-        }).toList(),
+        children: exercises.map((e) => _ExerciseRow(exercise: e)).toList(),
       ),
     );
   }
+}
+
+class _ExerciseRow extends ConsumerWidget {
+  final Exercise exercise;
+  const _ExerciseRow({required this.exercise});
+
+  WorkoutType _typeForExercise(Exercise e) {
+    if (e.tags.any((t) => ['Bola', 'Domínio', 'Drible'].contains(t)))
+      return WorkoutType.bola;
+    if (e.tags.any(
+        (t) => ['Mobilidade', 'Quadril', 'Cervical', 'Lombar'].contains(t)))
+      return WorkoutType.mobilidade;
+    return WorkoutType.musculacao;
+  }
+
+  Future<void> _showEditDialog(BuildContext context, WidgetRef ref) async {
+    final nameCtrl = TextEditingController(text: exercise.name);
+    final tagsCtrl = TextEditingController(text: exercise.tags.join(', '));
+
+    await showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: ForgeColors.card,
+        title: const Text('Editar exercício',
+            style: TextStyle(
+                fontFamily: 'BebasNeue',
+                fontSize: 22,
+                color: ForgeColors.text)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          _DialogField(controller: nameCtrl, label: 'Nome'),
+          const SizedBox(height: 12),
+          _DialogField(
+              controller: tagsCtrl, label: 'Tags (separadas por vírgula)'),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar',
+                  style: TextStyle(color: ForgeColors.muted))),
+          TextButton(
+              onPressed: () async {
+                final name = nameCtrl.text.trim();
+                if (name.isEmpty) return;
+                exercise.name = name;
+                exercise.tags = tagsCtrl.text
+                    .split(',')
+                    .map((t) => t.trim())
+                    .where((t) => t.isNotEmpty)
+                    .toList();
+                await ref.read(exerciseRepositoryProvider).save(exercise);
+                if (context.mounted) Navigator.pop(context);
+              },
+              child: const Text('Salvar',
+                  style: TextStyle(color: Color(0xFF00e5c8)))),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: ForgeColors.card,
+        title: const Text('Deletar exercício',
+            style: TextStyle(
+                fontFamily: 'BebasNeue',
+                fontSize: 22,
+                color: ForgeColors.text)),
+        content: Text(
+            'Deletar "${exercise.name}"? Esta ação não pode ser desfeita.',
+            style: const TextStyle(fontSize: 13, color: ForgeColors.muted)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar',
+                  style: TextStyle(color: ForgeColors.muted))),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Deletar',
+                  style: TextStyle(color: Color(0xFFef4444)))),
+        ],
+      ),
+    );
+    if (confirm == true && exercise.id != null) {
+      await ref.read(exerciseRepositoryProvider).delete(exercise.id!);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final type = _typeForExercise(exercise);
+    final color = ForgeHelpers.workoutTypeColor(type);
+    final icon = ForgeHelpers.workoutTypeIcon(type);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+          color: ForgeColors.card,
+          border: Border.all(color: ForgeColors.border),
+          borderRadius: BorderRadius.circular(12)),
+      child: Row(children: [
+        Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+              color: color.withOpacity(.1),
+              borderRadius: BorderRadius.circular(10)),
+          child: Icon(icon, color: color, size: 17),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(exercise.name,
+              style: const TextStyle(
+                  fontSize: 14,
+                  color: ForgeColors.text,
+                  fontWeight: FontWeight.w500)),
+          Text('${exercise.type.name} · ${exercise.tags.join(", ")}',
+              style: const TextStyle(fontSize: 11, color: ForgeColors.muted)),
+        ])),
+        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          Text(
+            exercise.defaultWeight != null
+                ? '${exercise.defaultWeight!.toStringAsFixed(0)} kg'
+                : '—',
+            style: TextStyle(
+                fontSize: 13, color: color, fontWeight: FontWeight.w600),
+          ),
+          const Text('padrão',
+              style: TextStyle(fontSize: 9, color: ForgeColors.muted)),
+        ]),
+        const SizedBox(width: 8),
+        Column(children: [
+          _SmallIconBtn(
+              icon: LucideIcons.pencil,
+              onTap: () => _showEditDialog(context, ref)),
+          const SizedBox(height: 2),
+          _SmallIconBtn(
+              icon: LucideIcons.trash_2,
+              onTap: () => _confirmDelete(context, ref)),
+        ]),
+      ]),
+    );
+  }
+}
+
+class _DialogField extends StatelessWidget {
+  final TextEditingController controller;
+  final String label;
+  const _DialogField({required this.controller, required this.label});
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: const TextStyle(fontSize: 11, color: ForgeColors.muted)),
+          const SizedBox(height: 4),
+          TextField(
+            controller: controller,
+            style: const TextStyle(fontSize: 14, color: ForgeColors.text),
+            decoration: const InputDecoration(
+              enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: ForgeColors.border)),
+              focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Color(0xFF00e5c8))),
+            ),
+          ),
+        ],
+      );
 }
 
 class _Tag extends StatelessWidget {

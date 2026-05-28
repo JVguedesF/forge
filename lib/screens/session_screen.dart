@@ -1476,8 +1476,10 @@ class _SessionSummaryScreenState extends ConsumerState<SessionSummaryScreen> {
   }
 
   Future<void> _save() async {
+    // Guard síncrono — evita double-save se usuário tocar duas vezes rápido
     if (_saving) return;
-    setState(() => _saving = true);
+    _saving = true;
+    if (mounted) setState(() {});
 
     final notifier = ref.read(activeSessionProvider.notifier);
     notifier.setEffort(_effort ?? 3);
@@ -1487,31 +1489,34 @@ class _SessionSummaryScreenState extends ConsumerState<SessionSummaryScreen> {
     if (session != null) {
       final ts = session.toTrainingSession();
 
-      // Detecta PRs
+      // Detecta PRs (apenas musculação tem peso)
       int prCount = 0;
-      for (final ex in session.exercises) {
-        if (ex.exerciseId == null || ex.exerciseId == 0) continue;
-        final completedSets = ex.sets
-            .where((s) => s.completed && s.weight != null && s.weight! > 0)
-            .toList();
-        if (completedSets.isEmpty) continue;
-        final maxWeight =
-            completedSets.map((s) => s.weight!).reduce((a, b) => a > b ? a : b);
-        final isPR = await ref.read(prRepositoryProvider).checkAndSavePR(
-              ex.exerciseId!,
-              ex.exerciseName,
-              session.workoutType,
-              maxWeight,
-              'kg',
-              0, // sessionId ainda não existe, atualiza depois
-            );
-        if (isPR) prCount++;
+      if (session.workoutType == WorkoutType.musculacao) {
+        for (final ex in session.exercises) {
+          if (ex.exerciseId == null || ex.exerciseId == 0) continue;
+          final completedSets = ex.sets
+              .where((s) => s.completed && s.weight != null && s.weight! > 0)
+              .toList();
+          if (completedSets.isEmpty) continue;
+          final maxWeight = completedSets
+              .map((s) => s.weight!)
+              .reduce((a, b) => a > b ? a : b);
+          final isPR = await ref.read(prRepositoryProvider).checkAndSavePR(
+                ex.exerciseId!,
+                ex.exerciseName,
+                session.workoutType,
+                maxWeight,
+                'kg',
+                0,
+              );
+          if (isPR) prCount++;
+        }
       }
 
       ts.prCount = prCount;
-      final savedId = await ref.read(sessionRepositoryProvider).save(ts);
+      await ref.read(sessionRepositoryProvider).save(ts);
 
-      // Incrementa completedSessions no macro
+      // Incrementa completedSessions no macro (uma única vez)
       await ref.read(macroCycleRepositoryProvider).incrementCompletedSessions();
     }
 
