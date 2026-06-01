@@ -10,6 +10,15 @@ import '../screens/workout_builder_screen.dart';
 import '../screens/session_screen.dart';
 import '../screens/macro_screen.dart';
 import '../screens/settings_screen.dart';
+import '../data/models/enums.dart';
+
+WorkoutType? _parseWorkoutType(String s) {
+  try {
+    return WorkoutType.values.firstWhere((t) => t.name == s);
+  } catch (_) {
+    return null;
+  }
+}
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -40,15 +49,19 @@ final routerProvider = Provider<GoRouter>((ref) {
           final workoutId = int.tryParse(s.uri.queryParameters['id'] ?? '');
           final workoutName =
               Uri.decodeComponent(s.uri.queryParameters['name'] ?? '');
+          final typeStr = s.uri.queryParameters['type'] ?? '';
+          final workoutType = _parseWorkoutType(typeStr);
           final sessionMode = switch (mode) {
             'timed' => SessionMode.timed,
             'corrida' => SessionMode.corrida,
             _ => SessionMode.musculacao,
           };
           return SessionScreen(
-              mode: sessionMode,
-              workoutId: workoutId,
-              workoutName: workoutName);
+            mode: sessionMode,
+            workoutId: workoutId,
+            workoutName: workoutName,
+            workoutType: workoutType,
+          );
         },
       ),
       GoRoute(path: '/session/form', builder: (c, s) => const RunFormScreen()),

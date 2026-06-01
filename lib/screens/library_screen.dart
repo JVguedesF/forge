@@ -6,8 +6,10 @@ import '../core/theme/app_theme.dart';
 import '../core/theme/theme_provider.dart';
 import '../core/helpers/forge_helpers.dart';
 import '../providers/workout_providers.dart';
+import '../providers/session_providers.dart';
 import '../data/models/workout.dart';
 import '../data/models/exercise.dart';
+import '../data/models/training_session.dart';
 import '../data/models/enums.dart';
 
 class LibraryScreen extends ConsumerStatefulWidget {
@@ -229,15 +231,15 @@ class _WorkoutCard extends ConsumerWidget {
 
   static String _modeForType(WorkoutType type) => switch (type) {
         WorkoutType.corrida => 'corrida',
-        WorkoutType.mobilidade => 'timed',
-        WorkoutType.drills => 'timed',
-        WorkoutType.bola => 'timed',
-        _ => 'musculacao',
+        WorkoutType.musculacao => 'musculacao',
+        _ => 'timed',
       };
 
+  // B1 FIX: usa rootNavigator: true para evitar tela preta
   Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
     final confirm = await showDialog<bool>(
       context: context,
+      useRootNavigator: true,
       builder: (_) => AlertDialog(
         backgroundColor: ForgeColors.card,
         title: const Text('Deletar treino',
@@ -250,11 +252,13 @@ class _WorkoutCard extends ConsumerWidget {
             style: const TextStyle(fontSize: 13, color: ForgeColors.muted)),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: () =>
+                  Navigator.of(context, rootNavigator: true).pop(false),
               child: const Text('Cancelar',
                   style: TextStyle(color: ForgeColors.muted))),
           TextButton(
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () =>
+                  Navigator.of(context, rootNavigator: true).pop(true),
               child: const Text('Deletar',
                   style: TextStyle(color: Color(0xFFef4444)))),
         ],
@@ -271,6 +275,9 @@ class _WorkoutCard extends ConsumerWidget {
     final colorLight = ForgeHelpers.workoutTypeColorLight(workout.type);
     final icon = ForgeHelpers.workoutTypeIcon(workout.type);
     final mode = _modeForType(workout.type);
+    final idPart = workout.id != null ? '&id=${workout.id}' : '';
+    final url =
+        '/session?mode=$mode&type=${workout.type.name}$idPart&name=${Uri.encodeComponent(workout.name)}';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -308,21 +315,17 @@ class _WorkoutCard extends ConsumerWidget {
         const SizedBox(width: 8),
         Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
           Row(children: [
-            // Botão editar — abre WorkoutBuilder com ID
             _SmallIconBtn(
                 icon: LucideIcons.pencil,
                 onTap: () => context.push('/builder?id=${workout.id}')),
             const SizedBox(width: 2),
-            // Botão deletar
             _SmallIconBtn(
                 icon: LucideIcons.trash_2,
                 onTap: () => _confirmDelete(context, ref)),
           ]),
           const SizedBox(height: 5),
           GestureDetector(
-            onTap: () => context.push(
-              '/session?mode=$mode&id=${workout.id}&name=${Uri.encodeComponent(workout.name)}',
-            ),
+            onTap: () => context.push(url),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
               decoration: BoxDecoration(
@@ -341,7 +344,7 @@ class _WorkoutCard extends ConsumerWidget {
   }
 }
 
-// ── Aba Exercícios com editar/deletar
+// ── Aba Exercícios — B5 FIX: histórico do exercício ao tocar
 class _ExercisesTab extends ConsumerWidget {
   const _ExercisesTab();
 
@@ -375,12 +378,66 @@ class _ExerciseRow extends ConsumerWidget {
     return WorkoutType.musculacao;
   }
 
+  // B5 FIX: abre bottom sheet de histórico do exercício
+  void _showHistory(BuildContext context, WidgetRef ref) {
+    final sessionsAsync = ref.read(sessionsProvider);
+    final sessions = sessionsAsync.valueOrNull ?? [];
+
+    // Filtra sessões que contêm este exercício
+    final exerciseSessions = <(DateTime, double, String)>[];
+    for (final s in sessions) {
+      for (final ex in s.exercises) {
+        if (ex.exerciseId == exercise.id || ex.exerciseName == exercise.name) {
+          final completedSets = ex.sets
+              .where((set) => set.completed && set.weight != null)
+              .toList();
+          if (completedSets.isNotEmpty) {
+            final maxW = completedSets
+                .map((s) => s.weight!)
+                .reduce((a, b) => a > b ? a : b);
+            final setsStr = completedSets
+                .map(
+                    (s) => '${s.weight?.toStringAsFixed(0)}kg×${s.reps ?? "?"}')
+                .join(', ');
+            exerciseSessions.add((s.startTime, maxW, setsStr));
+          }
+          break;
+        }
+      }
+    }
+
+    final type = _typeForExercise(exercise);
+    final color = ForgeHelpers.workoutTypeColor(type);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: ForgeColors.surface,
+      isScrollControlled: true,
+      useRootNavigator: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: .75,
+        maxChildSize: .95,
+        minChildSize: .5,
+        expand: false,
+        builder: (_, ctrl) => _ExerciseHistorySheet(
+          exercise: exercise,
+          color: color,
+          sessions: exerciseSessions,
+          controller: ctrl,
+        ),
+      ),
+    );
+  }
+
   Future<void> _showEditDialog(BuildContext context, WidgetRef ref) async {
     final nameCtrl = TextEditingController(text: exercise.name);
     final tagsCtrl = TextEditingController(text: exercise.tags.join(', '));
 
     await showDialog(
       context: context,
+      useRootNavigator: true,
       builder: (_) => AlertDialog(
         backgroundColor: ForgeColors.card,
         title: const Text('Editar exercício',
@@ -396,7 +453,7 @@ class _ExerciseRow extends ConsumerWidget {
         ]),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
               child: const Text('Cancelar',
                   style: TextStyle(color: ForgeColors.muted))),
           TextButton(
@@ -410,7 +467,8 @@ class _ExerciseRow extends ConsumerWidget {
                     .where((t) => t.isNotEmpty)
                     .toList();
                 await ref.read(exerciseRepositoryProvider).save(exercise);
-                if (context.mounted) Navigator.pop(context);
+                if (context.mounted)
+                  Navigator.of(context, rootNavigator: true).pop();
               },
               child: const Text('Salvar',
                   style: TextStyle(color: Color(0xFF00e5c8)))),
@@ -420,8 +478,10 @@ class _ExerciseRow extends ConsumerWidget {
   }
 
   Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+    // B1 FIX: rootNavigator: true
     final confirm = await showDialog<bool>(
       context: context,
+      useRootNavigator: true,
       builder: (_) => AlertDialog(
         backgroundColor: ForgeColors.card,
         title: const Text('Deletar exercício',
@@ -434,11 +494,13 @@ class _ExerciseRow extends ConsumerWidget {
             style: const TextStyle(fontSize: 13, color: ForgeColors.muted)),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: () =>
+                  Navigator.of(context, rootNavigator: true).pop(false),
               child: const Text('Cancelar',
                   style: TextStyle(color: ForgeColors.muted))),
           TextButton(
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () =>
+                  Navigator.of(context, rootNavigator: true).pop(true),
               child: const Text('Deletar',
                   style: TextStyle(color: Color(0xFFef4444)))),
         ],
@@ -455,60 +517,355 @@ class _ExerciseRow extends ConsumerWidget {
     final color = ForgeHelpers.workoutTypeColor(type);
     final icon = ForgeHelpers.workoutTypeIcon(type);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-      decoration: BoxDecoration(
-          color: ForgeColors.card,
-          border: Border.all(color: ForgeColors.border),
-          borderRadius: BorderRadius.circular(12)),
-      child: Row(children: [
-        Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-              color: color.withOpacity(.1),
-              borderRadius: BorderRadius.circular(10)),
-          child: Icon(icon, color: color, size: 17),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(exercise.name,
-              style: const TextStyle(
-                  fontSize: 14,
-                  color: ForgeColors.text,
-                  fontWeight: FontWeight.w500)),
-          Text('${exercise.type.name} · ${exercise.tags.join(", ")}',
-              style: const TextStyle(fontSize: 11, color: ForgeColors.muted)),
-        ])),
-        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Text(
-            exercise.defaultWeight != null
-                ? '${exercise.defaultWeight!.toStringAsFixed(0)} kg'
-                : '—',
-            style: TextStyle(
-                fontSize: 13, color: color, fontWeight: FontWeight.w600),
+    return GestureDetector(
+      onTap: () => _showHistory(context, ref),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        decoration: BoxDecoration(
+            color: ForgeColors.card,
+            border: Border.all(color: ForgeColors.border),
+            borderRadius: BorderRadius.circular(12)),
+        child: Row(children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+                color: color.withOpacity(.1),
+                borderRadius: BorderRadius.circular(10)),
+            child: Icon(icon, color: color, size: 17),
           ),
-          const Text('padrão',
-              style: TextStyle(fontSize: 9, color: ForgeColors.muted)),
+          const SizedBox(width: 12),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text(exercise.name,
+                    style: const TextStyle(
+                        fontSize: 14,
+                        color: ForgeColors.text,
+                        fontWeight: FontWeight.w500)),
+                Text('${exercise.type.name} · ${exercise.tags.join(", ")}',
+                    style: const TextStyle(
+                        fontSize: 11, color: ForgeColors.muted)),
+              ])),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Text(
+              exercise.defaultWeight != null
+                  ? '${exercise.defaultWeight!.toStringAsFixed(0)} kg'
+                  : '—',
+              style: TextStyle(
+                  fontSize: 13, color: color, fontWeight: FontWeight.w600),
+            ),
+            const Text('padrão',
+                style: TextStyle(fontSize: 9, color: ForgeColors.muted)),
+          ]),
+          const SizedBox(width: 8),
+          Column(children: [
+            _SmallIconBtn(
+                icon: LucideIcons.pencil,
+                onTap: () => _showEditDialog(context, ref)),
+            const SizedBox(height: 2),
+            _SmallIconBtn(
+                icon: LucideIcons.trash_2,
+                onTap: () => _confirmDelete(context, ref)),
+          ]),
         ]),
-        const SizedBox(width: 8),
-        Column(children: [
-          _SmallIconBtn(
-              icon: LucideIcons.pencil,
-              onTap: () => _showEditDialog(context, ref)),
-          const SizedBox(height: 2),
-          _SmallIconBtn(
-              icon: LucideIcons.trash_2,
-              onTap: () => _confirmDelete(context, ref)),
-        ]),
-      ]),
+      ),
     );
   }
 }
 
+// B5: Bottom sheet de histórico do exercício
+class _ExerciseHistorySheet extends StatelessWidget {
+  final Exercise exercise;
+  final Color color;
+  final List<(DateTime, double, String)> sessions;
+  final ScrollController controller;
+  const _ExerciseHistorySheet(
+      {required this.exercise,
+      required this.color,
+      required this.sessions,
+      required this.controller});
+
+  static const _months = [
+    'jan',
+    'fev',
+    'mar',
+    'abr',
+    'mai',
+    'jun',
+    'jul',
+    'ago',
+    'set',
+    'out',
+    'nov',
+    'dez'
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final pr = sessions.isNotEmpty
+        ? sessions.map((s) => s.$2).reduce((a, b) => a > b ? a : b)
+        : null;
+
+    return Column(children: [
+      const SizedBox(height: 8),
+      Container(
+          width: 40,
+          height: 4,
+          decoration: BoxDecoration(
+              color: ForgeColors.border,
+              borderRadius: BorderRadius.circular(2))),
+      const SizedBox(height: 16),
+      Expanded(
+        child: ListView(
+          controller: controller,
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+          children: [
+            // Header
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Text(exercise.name,
+                        style: const TextStyle(
+                            fontFamily: 'BebasNeue',
+                            fontSize: 26,
+                            color: ForgeColors.text,
+                            height: 1)),
+                    const SizedBox(height: 2),
+                    Text(
+                        '${exercise.type.name} · ${exercise.tags.take(3).join(", ")}',
+                        style: const TextStyle(
+                            fontSize: 12, color: ForgeColors.muted)),
+                  ])),
+              if (pr != null)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                      color: color.withOpacity(.15),
+                      border: Border.all(color: color.withOpacity(.3)),
+                      borderRadius: BorderRadius.circular(10)),
+                  child: Column(children: [
+                    Text('${pr.toStringAsFixed(0)} kg',
+                        style: TextStyle(
+                            fontFamily: 'BebasNeue',
+                            fontSize: 20,
+                            color: color,
+                            letterSpacing: 0)),
+                    const Text('PR atual',
+                        style:
+                            TextStyle(fontSize: 9, color: ForgeColors.muted)),
+                  ]),
+                ),
+            ]),
+            const SizedBox(height: 16),
+
+            // Gráfico SVG de evolução de carga
+            if (sessions.length >= 2) ...[
+              const Text('EVOLUÇÃO DE CARGA',
+                  style: TextStyle(
+                      fontSize: 9,
+                      color: ForgeColors.muted,
+                      letterSpacing: 2,
+                      fontWeight: FontWeight.w600)),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                    color: ForgeColors.card,
+                    border: Border.all(color: ForgeColors.border),
+                    borderRadius: BorderRadius.circular(12)),
+                child: _WeightChart(sessions: sessions, color: color),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Últimas sessões
+            const Text('ÚLTIMAS SESSÕES',
+                style: TextStyle(
+                    fontSize: 9,
+                    color: ForgeColors.muted,
+                    letterSpacing: 2,
+                    fontWeight: FontWeight.w600)),
+            const SizedBox(height: 10),
+            if (sessions.isEmpty)
+              const Text('Nenhuma sessão registrada ainda.',
+                  style: TextStyle(fontSize: 13, color: ForgeColors.muted))
+            else
+              Container(
+                decoration: BoxDecoration(
+                    color: ForgeColors.card,
+                    border: Border.all(color: ForgeColors.border),
+                    borderRadius: BorderRadius.circular(12)),
+                clipBehavior: Clip.hardEdge,
+                child: Column(children: [
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    color: ForgeColors.surface,
+                    child: const Row(children: [
+                      Expanded(
+                          child: Text('Data',
+                              style: TextStyle(
+                                  fontSize: 9,
+                                  color: ForgeColors.muted,
+                                  fontWeight: FontWeight.w600))),
+                      SizedBox(
+                          width: 70,
+                          child: Text('Carga',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  fontSize: 9,
+                                  color: ForgeColors.muted,
+                                  fontWeight: FontWeight.w600))),
+                      SizedBox(
+                          width: 90,
+                          child: Text('Séries',
+                              textAlign: TextAlign.right,
+                              style: TextStyle(
+                                  fontSize: 9,
+                                  color: ForgeColors.muted,
+                                  fontWeight: FontWeight.w600))),
+                    ]),
+                  ),
+                  ...sessions.take(5).map((s) {
+                    final d = s.$1;
+                    final label = '${d.day} ${_months[d.month - 1]}';
+                    final isFirst = sessions.first == s;
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 9),
+                      decoration: const BoxDecoration(
+                          border: Border(
+                              top: BorderSide(color: ForgeColors.border))),
+                      child: Row(children: [
+                        Expanded(
+                            child: Text(label,
+                                style: const TextStyle(
+                                    fontSize: 12, color: ForgeColors.text))),
+                        SizedBox(
+                            width: 70,
+                            child: Text('${s.$2.toStringAsFixed(0)} kg',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: isFirst ? color : ForgeColors.muted,
+                                    fontWeight: isFirst
+                                        ? FontWeight.w600
+                                        : FontWeight.normal))),
+                        SizedBox(
+                            width: 90,
+                            child: Text(s.$3,
+                                textAlign: TextAlign.right,
+                                style: const TextStyle(
+                                    fontSize: 10, color: ForgeColors.muted))),
+                      ]),
+                    );
+                  }),
+                ]),
+              ),
+          ],
+        ),
+      ),
+    ]);
+  }
+}
+
+class _WeightChart extends StatelessWidget {
+  final List<(DateTime, double, String)> sessions;
+  final Color color;
+  const _WeightChart({required this.sessions, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    final reversed = sessions.reversed.toList();
+    final maxW = reversed.map((s) => s.$2).reduce((a, b) => a > b ? a : b);
+    final minW = reversed.map((s) => s.$2).reduce((a, b) => a < b ? a : b);
+    final range = (maxW - minW).clamp(1.0, double.infinity);
+
+    return SizedBox(
+      height: 80,
+      child: CustomPaint(
+        size: const Size(double.infinity, 80),
+        painter: _LineChartPainter(
+            sessions: reversed,
+            maxW: maxW,
+            minW: minW,
+            range: range,
+            color: color),
+      ),
+    );
+  }
+}
+
+class _LineChartPainter extends CustomPainter {
+  final List<(DateTime, double, String)> sessions;
+  final double maxW, minW, range;
+  final Color color;
+  const _LineChartPainter(
+      {required this.sessions,
+      required this.maxW,
+      required this.minW,
+      required this.range,
+      required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (sessions.length < 2) return;
+    final n = sessions.length;
+    final pts = sessions.asMap().entries.map((e) {
+      final x = e.key / (n - 1) * size.width;
+      final y =
+          size.height - (e.value.$2 - minW) / range * (size.height - 16) - 4;
+      return Offset(x, y);
+    }).toList();
+
+    // Fill
+    final fillPath = Path()..moveTo(pts.first.dx, size.height);
+    for (final p in pts) fillPath.lineTo(p.dx, p.dy);
+    fillPath.lineTo(pts.last.dx, size.height);
+    fillPath.close();
+    canvas.drawPath(
+        fillPath,
+        Paint()
+          ..shader = LinearGradient(
+                  colors: [color.withOpacity(.25), color.withOpacity(0)],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter)
+              .createShader(Rect.fromLTWH(0, 0, size.width, size.height)));
+
+    // Line
+    final linePath = Path()..moveTo(pts.first.dx, pts.first.dy);
+    for (final p in pts.skip(1)) linePath.lineTo(p.dx, p.dy);
+    canvas.drawPath(
+        linePath,
+        Paint()
+          ..color = color
+          ..strokeWidth = 2.5
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round);
+
+    // Dots
+    for (final p in pts) {
+      canvas.drawCircle(
+          p,
+          4,
+          Paint()
+            ..color = color
+            ..style = PaintingStyle.fill);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_LineChartPainter old) => false;
+}
+
+// ── Shared widgets
 class _DialogField extends StatelessWidget {
   final TextEditingController controller;
   final String label;

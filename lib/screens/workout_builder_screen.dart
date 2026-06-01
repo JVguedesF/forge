@@ -16,6 +16,7 @@ class _LiveExercise {
   String name;
   String reps;
   double? suggestedWeight;
+  int durationSeconds;
   ExerciseType type;
 
   _LiveExercise({
@@ -23,6 +24,7 @@ class _LiveExercise {
     required this.name,
     this.reps = '10',
     this.suggestedWeight,
+    this.durationSeconds = 30,
     this.type = ExerciseType.weightReps,
   });
 }
@@ -43,6 +45,41 @@ class _LiveBlock {
   });
 }
 
+// F3: paleta de cores disponíveis
+const _availableColors = [
+  Color(0xFF3b82f6), // musculação azul
+  Color(0xFF0ea5e9), // corrida sky
+  Color(0xFF06b6d4), // drills ciano
+  Color(0xFF22c55e), // bola verde
+  Color(0xFF8b5cf6), // mobilidade roxo
+  Color(0xFFef4444), // vermelho
+  Color(0xFFf59e0b), // âmbar
+  Color(0xFFec4899), // rosa
+  Color(0xFF00e5c8), // teal accent
+  Color(0xFFff6b35), // laranja
+  Color(0xFFe8ff47), // neon
+  Color(0xFFd4d4d4), // carbon
+];
+
+// F3: ícones disponíveis
+const _availableIcons = <String, IconData>{
+  'dumbbell': LucideIcons.dumbbell,
+  'activity': LucideIcons.activity,
+  'zap': LucideIcons.zap,
+  'target': LucideIcons.target,
+  'leaf': LucideIcons.leaf,
+  'flame': LucideIcons.flame,
+  'heart': LucideIcons.heart,
+  'star': LucideIcons.star,
+  'trophy': LucideIcons.trophy,
+  'timer': LucideIcons.timer,
+  'bicycle': LucideIcons.bike,
+  'footprints': LucideIcons.footprints,
+  'swords': LucideIcons.swords,
+  'sparkles': LucideIcons.sparkles,
+  'sun': LucideIcons.sun,
+};
+
 class WorkoutBuilderScreen extends ConsumerStatefulWidget {
   final int? editWorkoutId;
   const WorkoutBuilderScreen({super.key, this.editWorkoutId});
@@ -60,9 +97,14 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
   bool _loaded = false;
   int? _editingId;
 
+  // F3: cor e ícone selecionados
+  Color _selectedColor = const Color(0xFF3b82f6);
+  String _selectedIcon = 'dumbbell';
+
   @override
   void initState() {
     super.initState();
+    _selectedColor = ForgeHelpers.workoutTypeColor(WorkoutType.musculacao);
     if (widget.editWorkoutId != null) {
       _editingId = widget.editWorkoutId;
       WidgetsBinding.instance.addPostFrameCallback((_) => _loadExisting());
@@ -76,7 +118,13 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
     setState(() {
       _nameCtrl.text = workout.name;
       _type = workout.type;
-      _selectedTags.addAll(workout.tags);
+      // F4: carrega tags corretamente
+      _selectedTags
+        ..clear()
+        ..addAll(workout.tags);
+      // F3: carrega cor e ícone
+      _selectedColor = Color(workout.colorValue);
+      _selectedIcon = workout.iconName;
       _blocks.clear();
       for (final b in workout.blocks) {
         _blocks.add(_LiveBlock(
@@ -90,6 +138,7 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
                     name: e.exerciseName,
                     reps: e.reps,
                     suggestedWeight: e.suggestedWeight,
+                    durationSeconds: e.durationSeconds,
                     type: e.type,
                   ))
               .toList(),
@@ -106,6 +155,16 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
   }
 
   List<String> get _availableTags => ForgeHelpers.tagsByType(_type);
+
+  // F2: tipo de exercício padrão por categoria do treino
+  ExerciseType get _defaultExerciseType => switch (_type) {
+        WorkoutType.musculacao => ExerciseType.weightReps,
+        WorkoutType.mobilidade => ExerciseType.timed,
+        WorkoutType.drills => ExerciseType.timed,
+        WorkoutType.corrida => ExerciseType.distancePace,
+        WorkoutType.bola => ExerciseType.repsOnly,
+        _ => ExerciseType.weightReps,
+      };
 
   Future<void> _save() async {
     if (_saving) return;
@@ -129,12 +188,13 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
 
     setState(() => _saving = true);
 
-    final color = ForgeHelpers.workoutTypeColor(_type);
     final workout = Workout()
       ..name = name
       ..type = _type
-      ..colorValue = color.value
-      ..iconName = _iconNameForType(_type)
+      // F3: usa cor e ícone selecionados
+      ..colorValue = _selectedColor.value
+      ..iconName = _selectedIcon
+      // F4: tags corretas
       ..tags = _selectedTags.toList()
       ..estimatedMinutes = _blocks.fold<int>(
           0,
@@ -159,25 +219,16 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
               ..type = ex.type
               ..reps = ex.reps
               ..suggestedWeight = ex.suggestedWeight
+              ..durationSeconds = ex.durationSeconds
               ..hasSides = false;
           }).toList();
         return block;
       }).toList();
 
-    // Preserva o ID ao editar treino existente
     if (_editingId != null) workout.id = _editingId;
     await ref.read(workoutRepositoryProvider).save(workout);
     if (mounted) context.pop();
   }
-
-  String _iconNameForType(WorkoutType t) => switch (t) {
-        WorkoutType.musculacao => 'dumbbell',
-        WorkoutType.corrida => 'activity',
-        WorkoutType.drills => 'zap',
-        WorkoutType.bola => 'target',
-        WorkoutType.mobilidade => 'leaf',
-        WorkoutType.custom => 'sparkles',
-      };
 
   void _addExerciseBlock() async {
     final ex = await _showExercisePicker();
@@ -186,8 +237,9 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
           _LiveExercise(
               exerciseId: ex.id,
               name: ex.name,
-              reps: ex.defaultReps ?? '10',
+              reps: ex.defaultReps,
               suggestedWeight: ex.defaultWeight,
+              durationSeconds: ex.defaultDurationSeconds,
               type: ex.type),
         ])));
   }
@@ -202,8 +254,9 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
             _LiveExercise(
                 exerciseId: ex.id,
                 name: ex.name,
-                reps: ex.defaultReps ?? '10',
+                reps: ex.defaultReps,
                 suggestedWeight: ex.defaultWeight,
+                durationSeconds: ex.defaultDurationSeconds,
                 type: ex.type),
           ],
         )));
@@ -216,12 +269,14 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
           _LiveExercise(
               exerciseId: ex.id,
               name: ex.name,
-              reps: ex.defaultReps ?? '10',
+              reps: ex.defaultReps,
               suggestedWeight: ex.defaultWeight,
+              durationSeconds: ex.defaultDurationSeconds,
               type: ex.type),
         ));
   }
 
+  // F1: picker com opção de criar exercício inline
   Future<Exercise?> _showExercisePicker() async {
     final exercises = await ref.read(exerciseRepositoryProvider).getAll();
     if (!mounted) return null;
@@ -229,9 +284,17 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
       context: context,
       backgroundColor: ForgeColors.card,
       isScrollControlled: true,
+      useRootNavigator: true,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => _ExercisePicker(exercises: exercises),
+      builder: (_) => _ExercisePicker(
+        exercises: exercises,
+        defaultType: _defaultExerciseType,
+        onCreateNew: (exercise) async {
+          await ref.read(exerciseRepositoryProvider).save(exercise);
+          return exercise;
+        },
+      ),
     );
   }
 
@@ -241,11 +304,38 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
       context: context,
       backgroundColor: ForgeColors.card,
       isScrollControlled: true,
+      useRootNavigator: true,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => _BlockEditor(block: block),
+      builder: (_) => _BlockEditor(block: block, workoutType: _type),
     );
     if (result != null) setState(() => _blocks[idx] = result);
+  }
+
+  // F3: picker de cor
+  Future<void> _showColorPicker() async {
+    final result = await showModalBottomSheet<Color>(
+      context: context,
+      backgroundColor: ForgeColors.surface,
+      useRootNavigator: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => _ColorPickerSheet(current: _selectedColor),
+    );
+    if (result != null) setState(() => _selectedColor = result);
+  }
+
+  // F3: picker de ícone
+  Future<void> _showIconPicker() async {
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: ForgeColors.surface,
+      useRootNavigator: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => _IconPickerSheet(current: _selectedIcon),
+    );
+    if (result != null) setState(() => _selectedIcon = result);
   }
 
   @override
@@ -267,7 +357,7 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
                       widget.editWorkoutId != null
                           ? 'Editar Treino'
                           : 'Novo Treino',
-                      style: TextStyle(
+                      style: const TextStyle(
                           fontFamily: 'BebasNeue',
                           fontSize: 22,
                           color: ForgeColors.text))),
@@ -339,6 +429,7 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
                           onTap: () => setState(() {
                             _type = t;
                             _selectedTags.clear();
+                            _selectedColor = ForgeHelpers.workoutTypeColor(t);
                           }),
                           child: Container(
                             decoration: BoxDecoration(
@@ -372,7 +463,80 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
                     ),
                     const SizedBox(height: 20),
 
-                    // Tags
+                    // F3: Cor e Ícone
+                    Row(children: [
+                      Expanded(
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                            const _SLabel('Cor'),
+                            GestureDetector(
+                              onTap: _showColorPicker,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 11),
+                                decoration: BoxDecoration(
+                                    color: ForgeColors.card,
+                                    border:
+                                        Border.all(color: ForgeColors.border),
+                                    borderRadius: BorderRadius.circular(12)),
+                                child: Row(children: [
+                                  Container(
+                                      width: 22,
+                                      height: 22,
+                                      decoration: BoxDecoration(
+                                          color: _selectedColor,
+                                          shape: BoxShape.circle)),
+                                  const SizedBox(width: 10),
+                                  const Text('Alterar',
+                                      style: TextStyle(
+                                          fontSize: 13,
+                                          color: ForgeColors.muted)),
+                                  const Spacer(),
+                                  const Icon(LucideIcons.chevron_right,
+                                      size: 14, color: ForgeColors.muted2),
+                                ]),
+                              ),
+                            ),
+                          ])),
+                      const SizedBox(width: 12),
+                      Expanded(
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                            const _SLabel('Ícone'),
+                            GestureDetector(
+                              onTap: _showIconPicker,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 11),
+                                decoration: BoxDecoration(
+                                    color: ForgeColors.card,
+                                    border:
+                                        Border.all(color: ForgeColors.border),
+                                    borderRadius: BorderRadius.circular(12)),
+                                child: Row(children: [
+                                  Icon(
+                                      _availableIcons[_selectedIcon] ??
+                                          LucideIcons.dumbbell,
+                                      color: _selectedColor,
+                                      size: 22),
+                                  const SizedBox(width: 10),
+                                  const Text('Alterar',
+                                      style: TextStyle(
+                                          fontSize: 13,
+                                          color: ForgeColors.muted)),
+                                  const Spacer(),
+                                  const Icon(LucideIcons.chevron_right,
+                                      size: 14, color: ForgeColors.muted2),
+                                ]),
+                              ),
+                            ),
+                          ])),
+                    ]),
+                    const SizedBox(height: 20),
+
+                    // Tags — F4 garantido
                     const _SLabel('Tags'),
                     Wrap(
                       spacing: 6,
@@ -457,7 +621,6 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
 
                     const SizedBox(height: 4),
 
-                    // Botões adicionar
                     Row(children: [
                       Expanded(
                           child: GestureDetector(
@@ -520,6 +683,125 @@ class _WorkoutBuilderScreenState extends ConsumerState<WorkoutBuilderScreen> {
   }
 }
 
+// ── F3: Color picker sheet
+class _ColorPickerSheet extends StatelessWidget {
+  final Color current;
+  const _ColorPickerSheet({required this.current});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+            width: 40,
+            height: 4,
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+                color: ForgeColors.border,
+                borderRadius: BorderRadius.circular(2))),
+        const Align(
+          alignment: Alignment.centerLeft,
+          child: Text('Escolher cor',
+              style: TextStyle(
+                  fontFamily: 'BebasNeue',
+                  fontSize: 22,
+                  color: ForgeColors.text)),
+        ),
+        const SizedBox(height: 16),
+        GridView.count(
+          crossAxisCount: 6,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+          children: _availableColors.map((c) {
+            final selected = c.value == current.value;
+            return GestureDetector(
+              onTap: () => Navigator.of(context, rootNavigator: true).pop(c),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: c,
+                  shape: BoxShape.circle,
+                  border: selected
+                      ? Border.all(color: Colors.white, width: 2.5)
+                      : null,
+                ),
+                child: selected
+                    ? const Icon(Icons.check, color: Colors.white, size: 18)
+                    : null,
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 20),
+      ]),
+    );
+  }
+}
+
+// ── F3: Icon picker sheet
+class _IconPickerSheet extends StatelessWidget {
+  final String current;
+  const _IconPickerSheet({required this.current});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+            width: 40,
+            height: 4,
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+                color: ForgeColors.border,
+                borderRadius: BorderRadius.circular(2))),
+        const Align(
+          alignment: Alignment.centerLeft,
+          child: Text('Escolher ícone',
+              style: TextStyle(
+                  fontFamily: 'BebasNeue',
+                  fontSize: 22,
+                  color: ForgeColors.text)),
+        ),
+        const SizedBox(height: 16),
+        GridView.count(
+          crossAxisCount: 5,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisSpacing: 10,
+          mainAxisSpacing: 10,
+          children: _availableIcons.entries.map((e) {
+            final selected = e.key == current;
+            return GestureDetector(
+              onTap: () =>
+                  Navigator.of(context, rootNavigator: true).pop(e.key),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: selected
+                      ? const Color(0xFF00e5c8).withOpacity(.15)
+                      : ForgeColors.card,
+                  border: Border.all(
+                      color: selected
+                          ? const Color(0xFF00e5c8)
+                          : ForgeColors.border),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(e.value,
+                    color:
+                        selected ? const Color(0xFF00e5c8) : ForgeColors.muted,
+                    size: 22),
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 20),
+      ]),
+    );
+  }
+}
+
 // ── Card de bloco
 class _BlockCard extends StatelessWidget {
   final _LiveBlock block;
@@ -564,6 +846,10 @@ class _BlockCard extends StatelessWidget {
                       fontSize: 12,
                       color: accent,
                       fontWeight: FontWeight.w600)),
+              const SizedBox(width: 6),
+              Text('${block.sets}× · ${block.restSeconds}s',
+                  style:
+                      const TextStyle(fontSize: 11, color: ForgeColors.muted)),
             ] else
               Expanded(
                   child: Column(
@@ -644,10 +930,11 @@ class _BlockCard extends StatelessWidget {
   }
 }
 
-// ── Editor de bloco (bottom sheet)
+// ── Editor de bloco — F2: campos dinâmicos por tipo
 class _BlockEditor extends StatefulWidget {
   final _LiveBlock block;
-  const _BlockEditor({required this.block});
+  final WorkoutType workoutType;
+  const _BlockEditor({required this.block, required this.workoutType});
 
   @override
   State<_BlockEditor> createState() => _BlockEditorState();
@@ -677,6 +964,13 @@ class _BlockEditorState extends State<_BlockEditor> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                      color: ForgeColors.border,
+                      borderRadius: BorderRadius.circular(2))),
               Row(children: [
                 const Text('Editar Bloco',
                     style: TextStyle(
@@ -701,99 +995,34 @@ class _BlockEditorState extends State<_BlockEditor> {
               const SizedBox(height: 16),
               Row(children: [
                 Expanded(
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                      const Text('SÉRIES',
-                          style: TextStyle(
-                              fontSize: 9,
-                              color: ForgeColors.muted,
-                              letterSpacing: 2)),
-                      const SizedBox(height: 6),
-                      Row(children: [
-                        _StepBtn(
-                            icon: LucideIcons.minus,
-                            onTap: () => setState(() {
-                                  if (_sets > 1) _sets--;
-                                })),
-                        const SizedBox(width: 12),
-                        Text('$_sets',
-                            style: const TextStyle(
-                                fontFamily: 'BebasNeue',
-                                fontSize: 28,
-                                color: ForgeColors.text,
-                                letterSpacing: 0)),
-                        const SizedBox(width: 12),
-                        _StepBtn(
-                            icon: LucideIcons.plus,
-                            onTap: () => setState(() => _sets++)),
-                      ]),
-                    ])),
+                    child: _StepField(
+                  label: 'SÉRIES',
+                  value: _sets,
+                  onDecrement: () => setState(() {
+                    if (_sets > 1) _sets--;
+                  }),
+                  onIncrement: () => setState(() => _sets++),
+                )),
                 const SizedBox(width: 24),
                 Expanded(
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                      const Text('DESCANSO (s)',
-                          style: TextStyle(
-                              fontSize: 9,
-                              color: ForgeColors.muted,
-                              letterSpacing: 2)),
-                      const SizedBox(height: 6),
-                      Row(children: [
-                        _StepBtn(
-                            icon: LucideIcons.minus,
-                            onTap: () => setState(() {
-                                  if (_rest >= 15) _rest -= 15;
-                                })),
-                        const SizedBox(width: 12),
-                        Text('${_rest}s',
-                            style: const TextStyle(
-                                fontFamily: 'BebasNeue',
-                                fontSize: 28,
-                                color: ForgeColors.text,
-                                letterSpacing: 0)),
-                        const SizedBox(width: 12),
-                        _StepBtn(
-                            icon: LucideIcons.plus,
-                            onTap: () => setState(() => _rest += 15)),
-                      ]),
-                    ])),
+                    child: _StepField(
+                  label: 'DESCANSO (s)',
+                  value: _rest,
+                  suffix: 's',
+                  onDecrement: () => setState(() {
+                    if (_rest >= 15) _rest -= 15;
+                  }),
+                  onIncrement: () => setState(() => _rest += 15),
+                )),
               ]),
               const SizedBox(height: 16),
+              // F2: campos por tipo de exercício
               ..._exercises.asMap().entries.map((e) {
                 final ex = e.value;
-                final ctrl = TextEditingController(text: ex.reps);
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                      color: ForgeColors.surface,
-                      border: Border.all(color: ForgeColors.border),
-                      borderRadius: BorderRadius.circular(10)),
-                  child: Row(children: [
-                    Expanded(
-                        child: Text(ex.name,
-                            style: const TextStyle(
-                                fontSize: 13, color: ForgeColors.text))),
-                    const Text('Reps: ',
-                        style:
-                            TextStyle(fontSize: 11, color: ForgeColors.muted)),
-                    SizedBox(
-                        width: 50,
-                        child: TextField(
-                          controller: ctrl,
-                          onChanged: (v) => _exercises[e.key].reps = v,
-                          style: const TextStyle(
-                              fontSize: 13, color: ForgeColors.text),
-                          decoration: const InputDecoration(
-                              border: InputBorder.none,
-                              isDense: true,
-                              contentPadding: EdgeInsets.zero),
-                          keyboardType: TextInputType.text,
-                        )),
-                  ]),
+                return _ExerciseFieldRow(
+                  exercise: ex,
+                  workoutType: widget.workoutType,
+                  onChanged: () => setState(() {}),
                 );
               }),
               const SizedBox(height: 8),
@@ -801,6 +1030,191 @@ class _BlockEditorState extends State<_BlockEditor> {
       ),
     );
   }
+}
+
+// F2: linha de campo de exercício dinâmica por tipo
+class _ExerciseFieldRow extends StatefulWidget {
+  final _LiveExercise exercise;
+  final WorkoutType workoutType;
+  final VoidCallback onChanged;
+  const _ExerciseFieldRow(
+      {required this.exercise,
+      required this.workoutType,
+      required this.onChanged});
+
+  @override
+  State<_ExerciseFieldRow> createState() => _ExerciseFieldRowState();
+}
+
+class _ExerciseFieldRowState extends State<_ExerciseFieldRow> {
+  late TextEditingController _repsCtrl;
+  late TextEditingController _kgCtrl;
+  late TextEditingController _durCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _repsCtrl = TextEditingController(text: widget.exercise.reps);
+    _kgCtrl = TextEditingController(
+        text: widget.exercise.suggestedWeight?.toStringAsFixed(0) ?? '');
+    _durCtrl =
+        TextEditingController(text: widget.exercise.durationSeconds.toString());
+  }
+
+  @override
+  void dispose() {
+    _repsCtrl.dispose();
+    _kgCtrl.dispose();
+    _durCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ex = widget.exercise;
+    final isTimed = ex.type == ExerciseType.timed ||
+        widget.workoutType == WorkoutType.mobilidade ||
+        widget.workoutType == WorkoutType.drills;
+    final isRepsOnly = ex.type == ExerciseType.repsOnly ||
+        widget.workoutType == WorkoutType.bola;
+    final isWeightReps =
+        !isTimed && !isRepsOnly && widget.workoutType == WorkoutType.musculacao;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+          color: ForgeColors.surface,
+          border: Border.all(color: ForgeColors.border),
+          borderRadius: BorderRadius.circular(10)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(ex.name,
+            style: const TextStyle(
+                fontSize: 13,
+                color: ForgeColors.text,
+                fontWeight: FontWeight.w500)),
+        const SizedBox(height: 8),
+        Row(children: [
+          if (isTimed) ...[
+            Expanded(
+                child: _MiniField(
+              label: 'Duração (seg)',
+              controller: _durCtrl,
+              onChanged: (v) {
+                ex.durationSeconds = int.tryParse(v) ?? 30;
+                widget.onChanged();
+              },
+            )),
+          ] else if (isWeightReps) ...[
+            Expanded(
+                child: _MiniField(
+              label: 'Reps',
+              controller: _repsCtrl,
+              onChanged: (v) {
+                ex.reps = v;
+                widget.onChanged();
+              },
+            )),
+            const SizedBox(width: 8),
+            Expanded(
+                child: _MiniField(
+              label: 'Carga (kg)',
+              controller: _kgCtrl,
+              onChanged: (v) {
+                ex.suggestedWeight = double.tryParse(v);
+                widget.onChanged();
+              },
+            )),
+          ] else ...[
+            // repsOnly / bola
+            Expanded(
+                child: _MiniField(
+              label: 'Reps',
+              controller: _repsCtrl,
+              onChanged: (v) {
+                ex.reps = v;
+                widget.onChanged();
+              },
+            )),
+          ],
+        ]),
+      ]),
+    );
+  }
+}
+
+class _MiniField extends StatelessWidget {
+  final String label;
+  final TextEditingController controller;
+  final void Function(String) onChanged;
+  const _MiniField(
+      {required this.label, required this.controller, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 9,
+                  color: ForgeColors.muted,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+                color: ForgeColors.card,
+                border: Border.all(color: ForgeColors.border),
+                borderRadius: BorderRadius.circular(8)),
+            child: TextField(
+              controller: controller,
+              onChanged: onChanged,
+              style: const TextStyle(fontSize: 13, color: ForgeColors.text),
+              decoration: const InputDecoration(
+                  border: InputBorder.none,
+                  isDense: true,
+                  contentPadding: EdgeInsets.zero),
+              keyboardType: TextInputType.text,
+            ),
+          ),
+        ],
+      );
+}
+
+class _StepField extends StatelessWidget {
+  final String label;
+  final int value;
+  final String suffix;
+  final VoidCallback onDecrement, onIncrement;
+  const _StepField(
+      {required this.label,
+      required this.value,
+      this.suffix = '',
+      required this.onDecrement,
+      required this.onIncrement});
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 9, color: ForgeColors.muted, letterSpacing: 2)),
+          const SizedBox(height: 6),
+          Row(children: [
+            _StepBtn(icon: LucideIcons.minus, onTap: onDecrement),
+            const SizedBox(width: 12),
+            Text('$value$suffix',
+                style: const TextStyle(
+                    fontFamily: 'BebasNeue',
+                    fontSize: 28,
+                    color: ForgeColors.text,
+                    letterSpacing: 0)),
+            const SizedBox(width: 12),
+            _StepBtn(icon: LucideIcons.plus, onTap: onIncrement),
+          ]),
+        ],
+      );
 }
 
 class _StepBtn extends StatelessWidget {
@@ -822,10 +1236,15 @@ class _StepBtn extends StatelessWidget {
       );
 }
 
-// ── Picker de exercícios
+// ── F1: Picker de exercícios com criação inline
 class _ExercisePicker extends StatefulWidget {
   final List<Exercise> exercises;
-  const _ExercisePicker({required this.exercises});
+  final ExerciseType defaultType;
+  final Future<Exercise?> Function(Exercise) onCreateNew;
+  const _ExercisePicker(
+      {required this.exercises,
+      required this.defaultType,
+      required this.onCreateNew});
 
   @override
   State<_ExercisePicker> createState() => _ExercisePickerState();
@@ -864,7 +1283,7 @@ class _ExercisePickerState extends State<_ExercisePicker> {
                         fontSize: 22,
                         color: ForgeColors.text))),
             GestureDetector(
-                onTap: () => Navigator.pop(context),
+                onTap: () => Navigator.of(context, rootNavigator: true).pop(),
                 child: const Icon(LucideIcons.x,
                     color: ForgeColors.muted, size: 18)),
           ]),
@@ -893,6 +1312,35 @@ class _ExercisePickerState extends State<_ExercisePicker> {
           ),
         ),
         const SizedBox(height: 8),
+        // F1: botão criar exercício inline
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: GestureDetector(
+            onTap: () => _createInline(context),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 11),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00e5c8).withOpacity(.1),
+                border:
+                    Border.all(color: const Color(0xFF00e5c8).withOpacity(.35)),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(LucideIcons.plus, color: Color(0xFF00e5c8), size: 14),
+                    SizedBox(width: 6),
+                    Text('Criar novo exercício',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF00e5c8),
+                            fontWeight: FontWeight.w600)),
+                  ]),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
         Expanded(
             child: ListView.builder(
           controller: ctrl,
@@ -909,7 +1357,7 @@ class _ExercisePickerState extends State<_ExercisePicker> {
             final color = ForgeHelpers.workoutTypeColor(type);
 
             return GestureDetector(
-              onTap: () => Navigator.pop(context, ex),
+              onTap: () => Navigator.of(context, rootNavigator: true).pop(ex),
               child: Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 padding:
@@ -946,9 +1394,164 @@ class _ExercisePickerState extends State<_ExercisePicker> {
       ]),
     );
   }
+
+  // F1: form inline para criar exercício
+  Future<void> _createInline(BuildContext context) async {
+    final nameCtrl = TextEditingController();
+    final kgCtrl = TextEditingController();
+    final repsCtrl = TextEditingController(text: '10');
+    final durCtrl = TextEditingController(text: '30');
+    final tagsCtrl = TextEditingController();
+    ExerciseType selectedType = widget.defaultType;
+
+    final result = await showDialog<Exercise>(
+      context: context,
+      useRootNavigator: true,
+      builder: (_) => StatefulBuilder(builder: (ctx, setS) {
+        return AlertDialog(
+          backgroundColor: ForgeColors.card,
+          title: const Text('Novo exercício',
+              style: TextStyle(
+                  fontFamily: 'BebasNeue',
+                  fontSize: 22,
+                  color: ForgeColors.text)),
+          content: SingleChildScrollView(
+            child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _AField(controller: nameCtrl, label: 'Nome'),
+                  const SizedBox(height: 10),
+                  const Text('Tipo',
+                      style: TextStyle(
+                          fontSize: 9,
+                          color: ForgeColors.muted,
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    children: ExerciseType.values.map((t) {
+                      final labels = {
+                        ExerciseType.weightReps: 'Peso+Reps',
+                        ExerciseType.timed: 'Tempo',
+                        ExerciseType.repsOnly: 'Reps',
+                        ExerciseType.distancePace: 'Distância',
+                      };
+                      return GestureDetector(
+                        onTap: () => setS(() => selectedType = t),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: selectedType == t
+                                ? const Color(0xFF00e5c8).withOpacity(.15)
+                                : ForgeColors.surface,
+                            border: Border.all(
+                                color: selectedType == t
+                                    ? const Color(0xFF00e5c8)
+                                    : ForgeColors.border),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(labels[t]!,
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: selectedType == t
+                                      ? const Color(0xFF00e5c8)
+                                      : ForgeColors.muted)),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 10),
+                  if (selectedType == ExerciseType.weightReps) ...[
+                    _AField(controller: kgCtrl, label: 'Carga padrão (kg)'),
+                    const SizedBox(height: 10),
+                    _AField(controller: repsCtrl, label: 'Reps padrão'),
+                  ] else if (selectedType == ExerciseType.timed) ...[
+                    _AField(controller: durCtrl, label: 'Duração padrão (seg)'),
+                  ] else ...[
+                    _AField(controller: repsCtrl, label: 'Reps padrão'),
+                  ],
+                  const SizedBox(height: 10),
+                  _AField(
+                      controller: tagsCtrl,
+                      label: 'Tags (separadas por vírgula)'),
+                ]),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () =>
+                    Navigator.of(ctx, rootNavigator: true).pop(null),
+                child: const Text('Cancelar',
+                    style: TextStyle(color: ForgeColors.muted))),
+            TextButton(
+                onPressed: () {
+                  final name = nameCtrl.text.trim();
+                  if (name.isEmpty) return;
+                  final ex = Exercise()
+                    ..name = name
+                    ..type = selectedType
+                    ..defaultWeight = double.tryParse(kgCtrl.text)
+                    ..defaultReps =
+                        repsCtrl.text.isNotEmpty ? repsCtrl.text : '10'
+                    ..defaultDurationSeconds = int.tryParse(durCtrl.text) ?? 30
+                    ..tags = tagsCtrl.text
+                        .split(',')
+                        .map((t) => t.trim())
+                        .where((t) => t.isNotEmpty)
+                        .toList()
+                    ..defaultSets = 3
+                    ..defaultRestSeconds = 90;
+                  Navigator.of(ctx, rootNavigator: true).pop(ex);
+                },
+                child: const Text('Criar',
+                    style: TextStyle(color: Color(0xFF00e5c8)))),
+          ],
+        );
+      }),
+    );
+
+    if (result != null) {
+      final saved = await widget.onCreateNew(result);
+      if (saved != null && context.mounted) {
+        Navigator.of(context, rootNavigator: true).pop(result);
+      }
+    }
+  }
 }
 
-// ── Widgets compartilhados
+class _AField extends StatelessWidget {
+  final TextEditingController controller;
+  final String label;
+  const _AField({required this.controller, required this.label});
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 9,
+                  color: ForgeColors.muted,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          TextField(
+            controller: controller,
+            style: const TextStyle(fontSize: 13, color: ForgeColors.text),
+            decoration: const InputDecoration(
+              enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: ForgeColors.border)),
+              focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Color(0xFF00e5c8))),
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(vertical: 4),
+            ),
+          ),
+        ],
+      );
+}
+
+// ── Shared
 class _SLabel extends StatelessWidget {
   final String text;
   const _SLabel(this.text);
