@@ -96,18 +96,24 @@ class HomeScreen extends ConsumerWidget {
                     return const SizedBox.shrink();
                   final phase = cycle.phases[cycle.currentPhaseIndex];
                   final weekday = DateTime.now().weekday;
-                  final schedule = phase.weeklySchedule
+                  final schedList = phase.weeklySchedule
                       .where((d) => d.weekday == weekday)
                       .toList();
-                  if (schedule.isEmpty) return const SizedBox.shrink();
-                  final names = schedule.first.workoutNames;
+                  if (schedList.isEmpty) return const SizedBox.shrink();
+                  final sched = schedList.first;
+                  final names = sched.workoutNames;
+                  final ids = sched.workoutIds;
                   if (names.isEmpty) return const SizedBox.shrink();
 
                   return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const _SectionLabel('Treinos de hoje'),
-                        ...names.map((name) => _WorkoutTodayCard(name: name)),
+                        ...names.asMap().entries.map((e) {
+                          final id = e.key < ids.length ? ids[e.key] : null;
+                          return _WorkoutTodayCard(
+                              name: e.value, workoutId: id);
+                        }),
                       ]);
                 },
               ),
@@ -287,39 +293,41 @@ class _EmptyMacroCard extends StatelessWidget {
 
 class _WorkoutTodayCard extends StatelessWidget {
   final String name;
-  const _WorkoutTodayCard({required this.name});
+  final int? workoutId;
+  const _WorkoutTodayCard({required this.name, this.workoutId});
 
   static String _modeForType(WorkoutType type) => switch (type) {
         WorkoutType.corrida => 'corrida',
-        WorkoutType.mobilidade => 'timed',
-        WorkoutType.drills => 'timed',
-        WorkoutType.bola => 'timed',
-        _ => 'musculacao',
+        WorkoutType.musculacao => 'musculacao',
+        _ => 'timed',
       };
+
+  static WorkoutType _typeForName(String name) {
+    final nl = name.toLowerCase();
+    if (nl.contains('upper') || nl.contains('lower'))
+      return WorkoutType.musculacao;
+    if (nl.contains('mob')) return WorkoutType.mobilidade;
+    if (nl.contains('corrida')) return WorkoutType.corrida;
+    if (nl.contains('drill')) return WorkoutType.drills;
+    if (nl.contains('bola')) return WorkoutType.bola;
+    return WorkoutType.custom;
+  }
 
   @override
   Widget build(BuildContext context) {
-    WorkoutType type = WorkoutType.custom;
-    final nl = name.toLowerCase();
-    if (nl.contains('upper') || nl.contains('lower'))
-      type = WorkoutType.musculacao;
-    else if (nl.contains('mob'))
-      type = WorkoutType.mobilidade;
-    else if (nl.contains('corrida'))
-      type = WorkoutType.corrida;
-    else if (nl.contains('drill'))
-      type = WorkoutType.drills;
-    else if (nl.contains('bola')) type = WorkoutType.bola;
-
+    final type = _typeForName(name);
     final color = ForgeHelpers.workoutTypeColor(type);
     final colorLight = ForgeHelpers.workoutTypeColorLight(type);
     final icon = ForgeHelpers.workoutTypeIcon(type);
     final label = ForgeHelpers.workoutTypeLabel(type);
     final mode = _modeForType(type);
 
+    final idPart = workoutId != null ? '&id=$workoutId' : '';
+    final url =
+        '/session?mode=$mode&type=${type.name}$idPart&name=${Uri.encodeComponent(name)}';
+
     return GestureDetector(
-      onTap: () =>
-          context.push('/session?mode=$mode&name=${Uri.encodeComponent(name)}'),
+      onTap: () => context.push(url),
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.all(14),

@@ -17,11 +17,13 @@ class SessionScreen extends ConsumerStatefulWidget {
   final SessionMode mode;
   final int? workoutId;
   final String workoutName;
+  final WorkoutType? workoutType;
   const SessionScreen({
     super.key,
     this.mode = SessionMode.musculacao,
     this.workoutId,
     this.workoutName = '',
+    this.workoutType,
   });
 
   @override
@@ -33,11 +35,12 @@ class _SessionScreenState extends ConsumerState<SessionScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final type = switch (widget.mode) {
-        SessionMode.musculacao => WorkoutType.musculacao,
-        SessionMode.timed => WorkoutType.mobilidade,
-        SessionMode.corrida => WorkoutType.corrida,
-      };
+      final type = widget.workoutType ??
+          switch (widget.mode) {
+            SessionMode.musculacao => WorkoutType.musculacao,
+            SessionMode.timed => WorkoutType.mobilidade,
+            SessionMode.corrida => WorkoutType.corrida,
+          };
       ref.read(activeSessionProvider.notifier).start(
             workoutId: widget.workoutId,
             workoutName:
@@ -50,6 +53,15 @@ class _SessionScreenState extends ConsumerState<SessionScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = ref.watch(themeProvider).valueOrNull ?? ForgeThemes.teal;
+
+    // B3/B4 FIX: resolve workoutType from param or mode
+    final resolvedType = widget.workoutType ??
+        switch (widget.mode) {
+          SessionMode.musculacao => WorkoutType.musculacao,
+          SessionMode.timed => WorkoutType.mobilidade,
+          SessionMode.corrida => WorkoutType.corrida,
+        };
+
     return switch (widget.mode) {
       SessionMode.musculacao => _MuscSession(
           theme: theme,
@@ -61,7 +73,9 @@ class _SessionScreenState extends ConsumerState<SessionScreen> {
           }),
       SessionMode.timed => _TimedSession(
           theme: theme,
+          workoutId: widget.workoutId,
           workoutName: widget.workoutName,
+          workoutType: resolvedType, // B3/B4 FIX
           onEnd: (elapsed) {
             ref.read(activeSessionProvider.notifier).setDuration(elapsed);
             context.pushReplacement('/session/summary');
@@ -77,14 +91,47 @@ class _SessionScreenState extends ConsumerState<SessionScreen> {
   }
 }
 
-// ── Modelo interno de série ao vivo
+// ─────────────────────────────────────
+// COMMON: abandon dialog (U2)
+// ─────────────────────────────────────
+Future<bool> _confirmAbandon(BuildContext context) async {
+  final result = await showDialog<bool>(
+    context: context,
+    useRootNavigator: true,
+    builder: (_) => AlertDialog(
+      backgroundColor: const Color(0xFF161616),
+      title: const Text('Abandonar treino?',
+          style: TextStyle(
+              fontFamily: 'BebasNeue', fontSize: 22, color: Color(0xFFf0f0f0))),
+      content: const Text(
+          'O progresso desta sessão será perdido.',
+          style: TextStyle(fontSize: 13, color: Color(0xFF666666))),
+      actions: [
+        TextButton(
+            onPressed: () =>
+                Navigator.of(context, rootNavigator: true).pop(false),
+            child: const Text('Continuar',
+                style: TextStyle(color: Color(0xFF666666)))),
+        TextButton(
+            onPressed: () =>
+                Navigator.of(context, rootNavigator: true).pop(true),
+            child: const Text('Abandonar',
+                style: TextStyle(color: Color(0xFFef4444)))),
+      ],
+    ),
+  );
+  return result ?? false;
+}
+
+// ─────────────────────────────────────
+// Modelo interno de série ao vivo
+// ─────────────────────────────────────
 class _LiveSet {
   String kg;
   String reps;
   bool done;
   bool active;
   final String prevBest;
-
   _LiveSet(
       {required this.prevBest,
       this.kg = '',
@@ -93,31 +140,29 @@ class _LiveSet {
       this.active = false});
 }
 
-// ── Modelo interno de exercício ao vivo
-class _ExEntry {
+// Unidade de execução — um exercício numa volta específica
+class _ExUnit {
   final int? exerciseId;
   final String name;
-  final List<String> tags;
   final String reps;
   final double? suggestedWeight;
   final int restSeconds;
   final ExerciseType type;
-  final List<_LiveSet> sets;
+  final _LiveSet liveSet;
 
-  _ExEntry({
+  _ExUnit({
     this.exerciseId,
     required this.name,
-    required this.tags,
     required this.reps,
     this.suggestedWeight,
     required this.restSeconds,
     required this.type,
-    required this.sets,
+    required this.liveSet,
   });
 }
 
 // ════════════════════════════════════
-// MUSCULAÇÃO
+// MUSCULAÇÃO — B2 FIX: superset interleaved
 // ════════════════════════════════════
 class _MuscSession extends ConsumerStatefulWidget {
   final ForgeTheme theme;
@@ -142,8 +187,11 @@ class _MuscSessionState extends ConsumerState<_MuscSession> {
   Timer? _restTimer;
   bool _loading = true;
 
-  List<_ExEntry> _exercises = [];
-  int _exIdx = 0;
+  // B2 FIX: lista plana de unidades de execução (exercício × volta)
+  // Para superset: ex1v1, ex2v1, [descanso], ex1v2, ex2v2, [descanso] ...
+  // Para exercício avulso: ex1v1, ex1v2, ex1v3 ...
+  List<_ExUnit> _units = [];
+  int _unitIdx = 0;
 
   @override
   void initState() {
@@ -168,126 +216,146 @@ class _MuscSessionState extends ConsumerState<_MuscSession> {
     }
 
     if (workout == null || workout.blocks.isEmpty) {
-      // fallback estático se não tiver treino
       setState(() {
-        _exercises = [
-          _ExEntry(
+        _units = [
+          _ExUnit(
             name: widget.workoutName.isNotEmpty
                 ? widget.workoutName
                 : 'Treino Livre',
-            tags: [],
             reps: '10',
             restSeconds: 90,
             type: ExerciseType.weightReps,
-            sets: List.generate(3, (_) => _LiveSet(prevBest: '—')),
+            liveSet: _LiveSet(prevBest: '—'),
           )
         ];
-        _exercises.first.sets.first.active = true;
+        _units.first.liveSet.active = true;
         _loading = false;
       });
       return;
     }
 
-    final entries = <_ExEntry>[];
-    for (final block in workout.blocks) {
-      for (final ex in block.exercises) {
-        final kgStr = ex.suggestedWeight?.toStringAsFixed(0) ?? '';
-        final prev = kgStr.isNotEmpty
-            ? '${kgStr}kg×${ex.reps}'
-            : ex.reps.isNotEmpty
-                ? ex.reps
-                : '—';
-        final liveSets = List.generate(
-            block.sets,
-            (_) => _LiveSet(
-                  prevBest: prev,
-                  kg: kgStr,
-                ));
-        if (liveSets.isNotEmpty) liveSets.first.active = true;
+    final units = <_ExUnit>[];
 
-        entries.add(_ExEntry(
-          exerciseId: ex.exerciseId,
-          name: ex.exerciseName,
-          tags: [],
-          reps: ex.reps.isNotEmpty ? ex.reps : '—',
-          suggestedWeight: ex.suggestedWeight,
-          restSeconds: block.restAfterSeconds > 0 ? block.restAfterSeconds : 90,
-          type: ex.type,
-          sets: liveSets,
-        ));
+    for (final block in workout.blocks) {
+      if (!block.isCircuit) {
+        // Exercício avulso: todas as séries em sequência
+        for (final ex in block.exercises) {
+          final kgStr = ex.suggestedWeight?.toStringAsFixed(0) ?? '';
+          final prev = kgStr.isNotEmpty ? '${kgStr}kg×${ex.reps}' : ex.reps;
+          for (int s = 0; s < block.sets; s++) {
+            units.add(_ExUnit(
+              exerciseId: ex.exerciseId,
+              name: ex.exerciseName,
+              reps: ex.reps.isNotEmpty ? ex.reps : '10',
+              suggestedWeight: ex.suggestedWeight,
+              restSeconds: block.restAfterSeconds > 0
+                  ? block.restAfterSeconds
+                  : 90,
+              type: ex.type,
+              liveSet: _LiveSet(prevBest: prev, kg: kgStr),
+            ));
+          }
+        }
+      } else {
+        // B2 FIX: Superset intercalado — por volta, todos os exercícios
+        for (int volta = 0; volta < block.sets; volta++) {
+          for (int exI = 0; exI < block.exercises.length; exI++) {
+            final ex = block.exercises[exI];
+            final kgStr = ex.suggestedWeight?.toStringAsFixed(0) ?? '';
+            final prev =
+                kgStr.isNotEmpty ? '${kgStr}kg×${ex.reps}' : ex.reps;
+            // Só aplica descanso no ÚLTIMO exercício de cada volta
+            final isLastExInVolta = exI == block.exercises.length - 1;
+            units.add(_ExUnit(
+              exerciseId: ex.exerciseId,
+              name: ex.exerciseName,
+              reps: ex.reps.isNotEmpty ? ex.reps : '10',
+              suggestedWeight: ex.suggestedWeight,
+              restSeconds: isLastExInVolta
+                  ? (block.restAfterSeconds > 0 ? block.restAfterSeconds : 120)
+                  : 0, // sem descanso entre exercícios do superset
+              type: ex.type,
+              liveSet: _LiveSet(prevBest: prev, kg: kgStr),
+            ));
+          }
+        }
       }
     }
 
+    if (units.isNotEmpty) units.first.liveSet.active = true;
+
     setState(() {
-      _exercises = entries;
+      _units = units;
       _loading = false;
     });
   }
 
-  _ExEntry? get _currentEx => _exercises.isEmpty ? null : _exercises[_exIdx];
+  _ExUnit? get _currentUnit =>
+      _units.isEmpty ? null : _units[_unitIdx];
 
-  int get _currentSetIdx => _currentEx?.sets.indexWhere((s) => s.active) ?? -1;
+  void _completeUnit() {
+    final unit = _currentUnit;
+    if (unit == null) return;
 
-  void _completeSet() {
-    final ex = _currentEx;
-    if (ex == null) return;
-    final setIdx = _currentSetIdx;
-    if (setIdx < 0) return;
-
-    final set = ex.sets[setIdx];
-    final kg = double.tryParse(set.kg);
-    final reps = int.tryParse(set.reps);
+    final kg = double.tryParse(unit.liveSet.kg);
+    final reps = int.tryParse(unit.liveSet.reps);
 
     ref.read(activeSessionProvider.notifier).addCompletedSet(
-          exerciseName: ex.name,
-          exerciseId: ex.exerciseId ?? 0,
+          exerciseName: unit.name,
+          exerciseId: unit.exerciseId ?? 0,
           weight: kg,
           reps: reps,
           durationSeconds: null,
         );
 
     setState(() {
-      set.done = true;
-      set.active = false;
+      unit.liveSet.done = true;
+      unit.liveSet.active = false;
 
-      _rest = ex.restSeconds;
-      _restTotal = ex.restSeconds;
-      _restTimer?.cancel();
-      _restTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-        setState(() {
-          if (_rest > 0) _rest--;
+      if (unit.restSeconds > 0) {
+        _rest = unit.restSeconds;
+        _restTotal = unit.restSeconds;
+        _restTimer?.cancel();
+        _restTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+          setState(() {
+            if (_rest > 0) _rest--;
+          });
         });
-      });
+      }
 
-      if (setIdx + 1 < ex.sets.length) {
-        ex.sets[setIdx + 1].active = true;
+      if (_unitIdx + 1 < _units.length) {
+        _unitIdx++;
+        _units[_unitIdx].liveSet.active = true;
       } else {
-        // último set deste exercício
-        if (_exIdx + 1 < _exercises.length) {
-          _exIdx++;
-          if (_exercises[_exIdx].sets.isNotEmpty) {
-            _exercises[_exIdx].sets.first.active = true;
-          }
-        } else {
-          // fim do treino
-          _elapsedTimer?.cancel();
-          widget.onEnd(_elapsed);
-        }
+        _elapsedTimer?.cancel();
+        widget.onEnd(_elapsed);
       }
     });
   }
 
-  void _prevEx() {
-    if (_exIdx > 0) setState(() => _exIdx--);
+  void _prevUnit() {
+    if (_unitIdx > 0) setState(() => _unitIdx--);
   }
 
-  void _nextEx() {
-    if (_exIdx + 1 < _exercises.length) setState(() => _exIdx++);
+  void _nextUnit() {
+    if (_unitIdx + 1 < _units.length) setState(() => _unitIdx++);
   }
 
   String _fmt(int s) =>
       '${(s ~/ 3600).toString().padLeft(2, '0')}:${((s % 3600) ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
-  String _fmtRest(int s) => '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+  String _fmtRest(int s) =>
+      '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+
+  // U2: abandon confirmation
+  Future<void> _tryClose(BuildContext ctx) async {
+    final abandon = await _confirmAbandon(ctx);
+    if (abandon && ctx.mounted) {
+      _elapsedTimer?.cancel();
+      _restTimer?.cancel();
+      ref.read(activeSessionProvider.notifier).clear();
+      ctx.pop();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -295,14 +363,14 @@ class _MuscSessionState extends ConsumerState<_MuscSession> {
 
     if (_loading) {
       return Scaffold(
-        backgroundColor: ForgeColors.bg,
+        backgroundColor: const Color(0xFF0a0a0a),
         body: Center(child: CircularProgressIndicator(color: accent)),
       );
     }
 
-    if (_exercises.isEmpty) {
+    if (_units.isEmpty) {
       return Scaffold(
-        backgroundColor: ForgeColors.bg,
+        backgroundColor: const Color(0xFF0a0a0a),
         body: Center(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
           const Text('Treino sem exercícios',
@@ -316,28 +384,21 @@ class _MuscSessionState extends ConsumerState<_MuscSession> {
       );
     }
 
-    final ex = _currentEx!;
-    final setIdx = _currentSetIdx;
-    final doneSets = ex.sets.where((s) => s.done).length;
+    final unit = _currentUnit!;
+    final totalUnits = _units.length;
+    final progressPct =
+        totalUnits > 0 ? (_unitIdx + 1) / totalUnits : 0.0;
     final restPct =
         _restTotal > 0 ? (1 - _rest / _restTotal).clamp(0.0, 1.0) : 1.0;
-    final totalEx = _exercises.length;
-    final progressPct = totalEx > 0
-        ? (_exIdx + (doneSets / ex.sets.length.clamp(1, 999))) / totalEx
-        : 0.0;
-
-    // Controllers para o set ativo
-    final activeSet = setIdx >= 0 ? ex.sets[setIdx] : null;
 
     return Scaffold(
-      backgroundColor: ForgeColors.bg,
+      backgroundColor: const Color(0xFF0a0a0a),
       body: SafeArea(
         child: Column(children: [
-          // AppBar
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
             child: Row(children: [
-              _XBtn(onTap: () => context.pop()),
+              _XBtn(onTap: () => _tryClose(context)),
               const SizedBox(width: 12),
               Expanded(
                   child: Column(children: [
@@ -361,7 +422,7 @@ class _MuscSessionState extends ConsumerState<_MuscSession> {
                     color: ForgeColors.card,
                     border: Border.all(color: ForgeColors.border),
                     borderRadius: BorderRadius.circular(20)),
-                child: Text('${_exIdx + 1} / $totalEx',
+                child: Text('${_unitIdx + 1} / $totalUnits',
                     style: const TextStyle(
                         fontSize: 11, color: ForgeColors.muted)),
               ),
@@ -376,7 +437,8 @@ class _MuscSessionState extends ConsumerState<_MuscSession> {
                 value: progressPct.clamp(0.0, 1.0),
                 minHeight: 4,
                 backgroundColor: ForgeColors.border,
-                valueColor: AlwaysStoppedAnimation(ForgeColors.musculacaoLight),
+                valueColor: AlwaysStoppedAnimation(
+                    ForgeColors.musculacaoLight),
               ),
             ),
           ),
@@ -387,15 +449,7 @@ class _MuscSessionState extends ConsumerState<_MuscSession> {
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (ex.tags.isNotEmpty)
-                      Wrap(
-                          spacing: 4,
-                          children: ex.tags
-                              .map((t) => _TagChip(t,
-                                  color: ForgeColors.musculacaoLight))
-                              .toList()),
-                    const SizedBox(height: 6),
-                    Text(ex.name,
+                    Text(unit.name,
                         style: const TextStyle(
                             fontFamily: 'BebasNeue',
                             fontSize: 46,
@@ -403,23 +457,54 @@ class _MuscSessionState extends ConsumerState<_MuscSession> {
                             height: .92)),
                     const SizedBox(height: 4),
                     Text(
-                        '${ex.sets.length} séries · ${ex.reps} reps · ${ex.restSeconds}s descanso',
+                        '${unit.reps} reps · ${unit.restSeconds > 0 ? "${unit.restSeconds}s descanso" : "sem descanso"}',
                         style: const TextStyle(
                             fontSize: 12, color: ForgeColors.muted)),
                     const SizedBox(height: 14),
 
-                    // Tabela de séries
-                    _LiveSetTable(
-                        sets: ex.sets,
-                        accent: accent,
-                        onKgChanged: (i, v) =>
-                            setState(() => ex.sets[i].kg = v),
-                        onRepsChanged: (i, v) =>
-                            setState(() => ex.sets[i].reps = v)),
+                    // Set input
+                    Container(
+                      decoration: BoxDecoration(
+                          color: ForgeColors.card,
+                          border: Border.all(color: ForgeColors.border),
+                          borderRadius: BorderRadius.circular(14)),
+                      padding: const EdgeInsets.all(14),
+                      child: Row(children: [
+                        Expanded(
+                            child: Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                              const Text('ANTERIOR',
+                                  style: TextStyle(
+                                      fontSize: 9,
+                                      color: ForgeColors.muted,
+                                      fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 4),
+                              Text(unit.liveSet.prevBest,
+                                  style: const TextStyle(
+                                      fontSize: 14,
+                                      color: ForgeColors.muted2)),
+                            ])),
+                        _NumInput(
+                            label: 'KG',
+                            value: unit.liveSet.kg,
+                            accent: accent,
+                            onChanged: (v) =>
+                                setState(() => unit.liveSet.kg = v)),
+                        const SizedBox(width: 8),
+                        _NumInput(
+                            label: 'REPS',
+                            value: unit.liveSet.reps,
+                            accent: accent,
+                            onChanged: (v) =>
+                                setState(() => unit.liveSet.reps = v)),
+                      ]),
+                    ),
                     const SizedBox(height: 10),
 
-                    // Timer de descanso
-                    if (_rest > 0 || _restTotal > 0)
+                    // Timer descanso
+                    if (_rest > 0)
                       Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
@@ -428,7 +513,8 @@ class _MuscSessionState extends ConsumerState<_MuscSession> {
                             borderRadius: BorderRadius.circular(14)),
                         child: Row(children: [
                           Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
                               children: [
                                 Text(_fmtRest(_rest),
                                     style: TextStyle(
@@ -449,7 +535,8 @@ class _MuscSessionState extends ConsumerState<_MuscSession> {
                                 value: restPct,
                                 minHeight: 4,
                                 backgroundColor: ForgeColors.border,
-                                valueColor: AlwaysStoppedAnimation(accent)),
+                                valueColor:
+                                    AlwaysStoppedAnimation(accent)),
                           )),
                           const SizedBox(width: 12),
                           GestureDetector(
@@ -461,11 +548,14 @@ class _MuscSessionState extends ConsumerState<_MuscSession> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 10, vertical: 6),
                               decoration: BoxDecoration(
-                                  border: Border.all(color: ForgeColors.border),
-                                  borderRadius: BorderRadius.circular(8)),
+                                  border: Border.all(
+                                      color: ForgeColors.border),
+                                  borderRadius:
+                                      BorderRadius.circular(8)),
                               child: const Text('Pular',
                                   style: TextStyle(
-                                      fontSize: 11, color: ForgeColors.muted)),
+                                      fontSize: 11,
+                                      color: ForgeColors.muted)),
                             ),
                           ),
                         ]),
@@ -474,20 +564,16 @@ class _MuscSessionState extends ConsumerState<_MuscSession> {
 
                     // Botão principal
                     GestureDetector(
-                      onTap: activeSet != null ? _completeSet : null,
+                      onTap: _completeUnit,
                       child: Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: activeSet != null
-                              ? ForgeColors.musculacao
-                              : ForgeColors.muted2,
+                          color: ForgeColors.musculacao,
                           borderRadius: BorderRadius.circular(14),
                         ),
                         child: Text(
-                          setIdx >= 0
-                              ? 'CONCLUIR SÉRIE ${setIdx + 1} →'
-                              : 'EXERCÍCIO CONCLUÍDO ✓',
+                          'CONCLUIR SÉRIE ${_unitIdx + 1} →',
                           textAlign: TextAlign.center,
                           style: const TextStyle(
                               fontFamily: 'BebasNeue',
@@ -497,27 +583,32 @@ class _MuscSessionState extends ConsumerState<_MuscSession> {
                       ),
                     ),
                     const SizedBox(height: 14),
-                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      GestureDetector(
-                        onTap: _exIdx > 0 ? _prevEx : null,
-                        child: Text('← Anterior',
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: _exIdx > 0
-                                    ? ForgeColors.muted
-                                    : ForgeColors.muted3)),
-                      ),
-                      const SizedBox(width: 28),
-                      GestureDetector(
-                        onTap: _exIdx + 1 < _exercises.length ? _nextEx : null,
-                        child: Text('Pular →',
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: _exIdx + 1 < _exercises.length
-                                    ? ForgeColors.muted
-                                    : ForgeColors.muted3)),
-                      ),
-                    ]),
+                    Row(
+                        mainAxisAlignment:
+                            MainAxisAlignment.center,
+                        children: [
+                          GestureDetector(
+                            onTap: _unitIdx > 0 ? _prevUnit : null,
+                            child: Text('← Anterior',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: _unitIdx > 0
+                                        ? ForgeColors.muted
+                                        : const Color(0xFF333333))),
+                          ),
+                          const SizedBox(width: 28),
+                          GestureDetector(
+                            onTap: _unitIdx + 1 < _units.length
+                                ? _nextUnit
+                                : null,
+                            child: Text('Pular →',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: _unitIdx + 1 < _units.length
+                                        ? ForgeColors.muted
+                                        : const Color(0xFF333333))),
+                          ),
+                        ]),
                   ]),
             ),
           ),
@@ -527,292 +618,137 @@ class _MuscSessionState extends ConsumerState<_MuscSession> {
   }
 }
 
-// Tabela de séries ao vivo com campos editáveis
-class _LiveSetTable extends StatelessWidget {
-  final List<_LiveSet> sets;
+class _NumInput extends StatefulWidget {
+  final String label;
+  final String value;
   final Color accent;
-  final void Function(int, String) onKgChanged;
-  final void Function(int, String) onRepsChanged;
-  const _LiveSetTable(
-      {required this.sets,
+  final void Function(String) onChanged;
+  const _NumInput(
+      {required this.label,
+      required this.value,
       required this.accent,
-      required this.onKgChanged,
-      required this.onRepsChanged});
+      required this.onChanged});
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-          color: ForgeColors.card,
-          border: Border.all(color: ForgeColors.border),
-          borderRadius: BorderRadius.circular(14)),
-      clipBehavior: Clip.hardEdge,
-      child: Column(children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          color: ForgeColors.surface,
-          child: const Row(children: [
-            SizedBox(
-                width: 28,
-                child: Text('#',
-                    style: TextStyle(
-                        fontSize: 9,
-                        color: ForgeColors.muted,
-                        fontWeight: FontWeight.w600))),
-            Expanded(
-                child: Text('ANTERIOR',
-                    style: TextStyle(
-                        fontSize: 9,
-                        color: ForgeColors.muted,
-                        fontWeight: FontWeight.w600))),
-            SizedBox(
-                width: 70,
-                child: Text('KG',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                        fontSize: 9,
-                        color: ForgeColors.muted,
-                        fontWeight: FontWeight.w600))),
-            SizedBox(
-                width: 70,
-                child: Text('REPS',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                        fontSize: 9,
-                        color: ForgeColors.muted,
-                        fontWeight: FontWeight.w600))),
-            SizedBox(width: 30),
-          ]),
-        ),
-        ...sets.asMap().entries.map((e) => _LiveSetRow(
-              index: e.key,
-              set: e.value,
-              accent: accent,
-              onKgChanged: (v) => onKgChanged(e.key, v),
-              onRepsChanged: (v) => onRepsChanged(e.key, v),
-            )),
-      ]),
-    );
-  }
+  State<_NumInput> createState() => _NumInputState();
 }
 
-class _LiveSetRow extends StatefulWidget {
-  final int index;
-  final _LiveSet set;
-  final Color accent;
-  final void Function(String) onKgChanged;
-  final void Function(String) onRepsChanged;
-  const _LiveSetRow(
-      {required this.index,
-      required this.set,
-      required this.accent,
-      required this.onKgChanged,
-      required this.onRepsChanged});
-
-  @override
-  State<_LiveSetRow> createState() => _LiveSetRowState();
-}
-
-class _LiveSetRowState extends State<_LiveSetRow> {
-  late TextEditingController _kgCtrl;
-  late TextEditingController _repsCtrl;
-
+class _NumInputState extends State<_NumInput> {
+  late TextEditingController _ctrl;
   @override
   void initState() {
     super.initState();
-    _kgCtrl = TextEditingController(text: widget.set.kg);
-    _repsCtrl = TextEditingController(text: widget.set.reps);
+    _ctrl = TextEditingController(text: widget.value);
   }
-
-  @override
-  void didUpdateWidget(_LiveSetRow old) {
-    super.didUpdateWidget(old);
-    if (old.set.active != widget.set.active && !widget.set.active) {
-      _kgCtrl.text = widget.set.kg;
-      _repsCtrl.text = widget.set.reps;
-    }
-  }
-
   @override
   void dispose() {
-    _kgCtrl.dispose();
-    _repsCtrl.dispose();
+    _ctrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final isActive = widget.set.active;
-    final isDone = widget.set.done;
-    final isPending = !isActive && !isDone;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(
-        color: isActive ? widget.accent.withOpacity(.12) : Colors.transparent,
-        border: Border(
-          top: BorderSide(
-              color: isActive
-                  ? widget.accent.withOpacity(.3)
-                  : ForgeColors.border),
-          left: isActive
-              ? BorderSide(color: widget.accent, width: 3)
-              : BorderSide.none,
-        ),
-      ),
-      child: Opacity(
-        opacity: isPending ? .3 : 1,
-        child: Row(children: [
-          SizedBox(
-              width: 28,
-              child: Text('${widget.index + 1}',
-                  style: TextStyle(
-                      fontSize: 13,
-                      color: isActive ? widget.accent : ForgeColors.muted,
-                      fontWeight:
-                          isActive ? FontWeight.w600 : FontWeight.normal))),
-          Expanded(
-              child: Text(widget.set.prevBest,
-                  style: const TextStyle(
-                      fontSize: 11, color: ForgeColors.muted2))),
-          SizedBox(
-              width: 70,
-              child: _EditCell(
-                  controller: _kgCtrl,
-                  active: isActive,
-                  done: isDone,
-                  accent: widget.accent,
-                  onChanged: widget.onKgChanged)),
-          SizedBox(
-              width: 70,
-              child: _EditCell(
-                  controller: _repsCtrl,
-                  active: isActive,
-                  done: isDone,
-                  accent: widget.accent,
-                  onChanged: widget.onRepsChanged,
-                  placeholder: '—')),
-          SizedBox(
-              width: 30,
-              child: isDone
-                  ? Container(
-                      width: 26,
-                      height: 26,
-                      decoration: const BoxDecoration(
-                          color: Color(0xFF22c55e), shape: BoxShape.circle),
-                      child: const Icon(Icons.check,
-                          color: Colors.white, size: 13))
-                  : isActive
-                      ? Container(
-                          width: 26,
-                          height: 26,
-                          decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border:
-                                  Border.all(color: widget.accent, width: 2)),
-                          child: Center(
-                              child: Text('○',
-                                  style: TextStyle(
-                                      fontSize: 11, color: widget.accent))))
-                      : Container(
-                          width: 26,
-                          height: 26,
-                          decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                  color: ForgeColors.muted3, width: 2)))),
-        ]),
-      ),
-    );
-  }
-}
-
-class _EditCell extends StatelessWidget {
-  final TextEditingController controller;
-  final bool active, done;
-  final Color accent;
-  final void Function(String) onChanged;
-  final String placeholder;
-  const _EditCell(
-      {required this.controller,
-      required this.active,
-      required this.done,
-      required this.accent,
-      required this.onChanged,
-      this.placeholder = ''});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 2),
-      padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 4),
-      decoration: BoxDecoration(
-        color: active
-            ? accent.withOpacity(.12)
-            : ForgeColors.border.withOpacity(.5),
-        border: active ? Border.all(color: accent) : null,
-        borderRadius: BorderRadius.circular(7),
-      ),
-      child: done
-          ? Center(
-              child: Text(
-                  controller.text.isNotEmpty ? controller.text : placeholder,
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: accent,
-                      fontWeight: FontWeight.w500)))
-          : TextField(
-              controller: controller,
-              enabled: active,
-              onChanged: onChanged,
-              keyboardType: TextInputType.number,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  fontSize: 12,
-                  color: active ? accent : ForgeColors.text,
-                  fontWeight: FontWeight.w500),
-              decoration: InputDecoration(
+    return SizedBox(
+      width: 72,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
+        Text(widget.label,
+            style: const TextStyle(
+                fontSize: 9,
+                color: ForgeColors.muted,
+                fontWeight: FontWeight.w600)),
+        const SizedBox(height: 4),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            color: widget.accent.withOpacity(.12),
+            border: Border.all(color: widget.accent),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: TextField(
+            controller: _ctrl,
+            onChanged: widget.onChanged,
+            keyboardType: TextInputType.number,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                fontSize: 18,
+                fontFamily: 'BebasNeue',
+                color: widget.accent,
+                letterSpacing: 0),
+            decoration: const InputDecoration(
                 border: InputBorder.none,
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 5),
-                hintText: placeholder,
-                hintStyle:
-                    const TextStyle(fontSize: 12, color: ForgeColors.muted2),
-              ),
-            ),
+                contentPadding: EdgeInsets.zero),
+          ),
+        ),
+      ]),
     );
   }
 }
 
 // ════════════════════════════════════
-// TIMED
+// TIMED — B3/B4 FIX: diferenciação por WorkoutType, F5
 // ════════════════════════════════════
 class _TimedSession extends ConsumerStatefulWidget {
   final ForgeTheme theme;
+  final int? workoutId;
   final String workoutName;
+  final WorkoutType workoutType; // B3/B4
   final void Function(int elapsed) onEnd;
   const _TimedSession(
-      {required this.theme, required this.onEnd, this.workoutName = ''});
+      {required this.theme,
+      required this.onEnd,
+      this.workoutId,
+      this.workoutName = '',
+      required this.workoutType});
 
   @override
   ConsumerState<_TimedSession> createState() => _TimedSessionState();
 }
 
+// Modelo de item de exercício timed ao vivo
+class _TimedItem {
+  final String name;
+  final String blockLabel;
+  final bool hasSides;
+  final int durationSeconds;
+  final bool showScoliosisAlert;
+  bool leftDone;
+  bool done;
+  _TimedItem({
+    required this.name,
+    required this.blockLabel,
+    this.hasSides = false,
+    required this.durationSeconds,
+    this.showScoliosisAlert = false,
+    this.leftDone = false,
+    this.done = false,
+  });
+}
+
 class _TimedSessionState extends ConsumerState<_TimedSession> {
   int _elapsed = 0;
-  int _countdown = 45;
-  final int _totalCountdown = 45;
+  int _countdown = 30;
+  int _countdownTotal = 30;
   Timer? _timer;
+  bool _loading = true;
+  bool _onLeftSide = true;
+
+  List<_TimedItem> _items = [];
+  int _itemIdx = 0;
 
   @override
   void initState() {
     super.initState();
-    _timer = Timer.periodic(
-        const Duration(seconds: 1),
-        (_) => setState(() {
-              _elapsed++;
-              if (_countdown > 0) _countdown--;
-            }));
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      setState(() {
+        _elapsed++;
+        if (_countdown > 0) _countdown--;
+        if (_countdown == 0 && _items.isNotEmpty) {
+          _autoAdvance();
+        }
+      });
+    });
+    _loadWorkout();
   }
 
   @override
@@ -821,23 +757,154 @@ class _TimedSessionState extends ConsumerState<_TimedSession> {
     super.dispose();
   }
 
+  Future<void> _loadWorkout() async {
+    Workout? workout;
+    if (widget.workoutId != null) {
+      workout =
+          await ref.read(workoutRepositoryProvider).getById(widget.workoutId!);
+    }
+
+    if (workout == null || workout.blocks.isEmpty) {
+      // fallback
+      setState(() {
+        _items = [
+          _TimedItem(
+              name: widget.workoutName.isNotEmpty
+                  ? widget.workoutName
+                  : 'Exercício',
+              blockLabel: '',
+              durationSeconds: 30)
+        ];
+        _countdown = 30;
+        _countdownTotal = 30;
+        _loading = false;
+      });
+      return;
+    }
+
+    final items = <_TimedItem>[];
+    final isMob = workout.type == WorkoutType.mobilidade;
+
+    for (final block in workout.blocks) {
+      final blockLabel = block.circuitName ?? '';
+      // B3/B4: escoliose apenas em mobilidade com blocos cervical/lombar
+      final scoliosis = isMob &&
+          (blockLabel.toLowerCase().contains('lombar') ||
+              blockLabel.toLowerCase().contains('cervical'));
+
+      for (final ex in block.exercises) {
+        items.add(_TimedItem(
+          name: ex.exerciseName,
+          blockLabel: blockLabel,
+          hasSides: ex.hasSides,
+          durationSeconds:
+              ex.durationSeconds > 0 ? ex.durationSeconds : 30,
+          showScoliosisAlert: scoliosis,
+        ));
+      }
+    }
+
+    if (items.isNotEmpty) {
+      setState(() {
+        _items = items;
+        _countdown = items.first.durationSeconds;
+        _countdownTotal = items.first.durationSeconds;
+        _loading = false;
+      });
+    }
+  }
+
+  void _autoAdvance() {
+    final item = _currentItem;
+    if (item == null) return;
+    if (item.hasSides && !item.leftDone && _onLeftSide) {
+      setState(() {
+        _onLeftSide = false;
+        item.leftDone = true;
+        _countdown = item.durationSeconds;
+        _countdownTotal = item.durationSeconds;
+      });
+    } else {
+      _completeItem();
+    }
+  }
+
+  void _completeItem() {
+    final item = _currentItem;
+    if (item == null) return;
+    setState(() {
+      item.done = true;
+      if (_itemIdx + 1 < _items.length) {
+        _itemIdx++;
+        _onLeftSide = true;
+        _countdown = _items[_itemIdx].durationSeconds;
+        _countdownTotal = _items[_itemIdx].durationSeconds;
+      } else {
+        _timer?.cancel();
+        widget.onEnd(_elapsed);
+      }
+    });
+  }
+
+  _TimedItem? get _currentItem =>
+      _items.isEmpty ? null : _items[_itemIdx];
+
+  // U2
+  Future<void> _tryClose(BuildContext ctx) async {
+    final abandon = await _confirmAbandon(ctx);
+    if (abandon && ctx.mounted) {
+      _timer?.cancel();
+      ref.read(activeSessionProvider.notifier).clear();
+      ctx.pop();
+    }
+  }
+
   String _fmt(int s) =>
       '${(s ~/ 3600).toString().padLeft(2, '0')}:${((s % 3600) ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
 
   @override
   Widget build(BuildContext context) {
-    const color = ForgeColors.mobilidade;
-    const colorLight = ForgeColors.mobilidadeLight;
-    final pct = _countdown / _totalCountdown;
+    if (_loading) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF0a0a0a),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final item = _currentItem;
+    if (item == null) return const SizedBox.shrink();
+
+    // B3/B4: cor baseada no tipo real
+    final Color color;
+    final Color colorLight;
+    switch (widget.workoutType) {
+      case WorkoutType.drills:
+        color = ForgeColors.drills;
+        colorLight = ForgeColors.drillsLight;
+      case WorkoutType.bola:
+        color = ForgeColors.bola;
+        colorLight = ForgeColors.bolaLight;
+      case WorkoutType.mobilidade:
+      default:
+        color = ForgeColors.mobilidade;
+        colorLight = ForgeColors.mobilidadeLight;
+    }
+
+    final pct = _countdownTotal > 0
+        ? _countdown / _countdownTotal
+        : 0.0;
+    final nextItem = _itemIdx + 1 < _items.length
+        ? _items[_itemIdx + 1]
+        : null;
 
     return Scaffold(
-      backgroundColor: ForgeColors.bg,
+      backgroundColor: const Color(0xFF0a0a0a),
       body: SafeArea(
         child: Column(children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
             child: Row(children: [
-              _XBtn(onTap: () => context.pop()),
+              _XBtn(onTap: () => _tryClose(context)),
               const SizedBox(width: 12),
               Expanded(
                   child: Column(children: [
@@ -848,21 +915,22 @@ class _TimedSessionState extends ConsumerState<_TimedSession> {
                         fontWeight: FontWeight.w600,
                         letterSpacing: 1)),
                 Text(_fmt(_elapsed),
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontFamily: 'BebasNeue',
                         fontSize: 20,
                         color: colorLight,
                         letterSpacing: 0)),
               ])),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                     color: ForgeColors.card,
                     border: Border.all(color: ForgeColors.border),
                     borderRadius: BorderRadius.circular(20)),
-                child: const Text('1 / 1',
-                    style: TextStyle(fontSize: 11, color: ForgeColors.muted)),
+                child: Text('${_itemIdx + 1} / ${_items.length}',
+                    style: const TextStyle(
+                        fontSize: 11, color: ForgeColors.muted)),
               ),
             ]),
           ),
@@ -872,10 +940,12 @@ class _TimedSessionState extends ConsumerState<_TimedSession> {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(2),
               child: LinearProgressIndicator(
-                  value: .25,
+                  value: _items.isNotEmpty
+                      ? (_itemIdx + 1) / _items.length
+                      : 0,
                   minHeight: 4,
                   backgroundColor: ForgeColors.border,
-                  valueColor: const AlwaysStoppedAnimation(color)),
+                  valueColor: AlwaysStoppedAnimation(color)),
             ),
           ),
           const SizedBox(height: 16),
@@ -883,66 +953,81 @@ class _TimedSessionState extends ConsumerState<_TimedSession> {
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Column(children: [
-                Container(
-                  width: double.infinity,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                  decoration: BoxDecoration(
-                      color: color.withOpacity(.1),
-                      border: Border.all(color: color.withOpacity(.28)),
-                      borderRadius: BorderRadius.circular(10)),
-                  child: const Row(children: [
-                    Text('🦵 Membros Inferiores',
-                        style: TextStyle(
-                            fontSize: 11,
-                            color: colorLight,
-                            fontWeight: FontWeight.w600)),
-                    Spacer(),
-                    Text('⚠ Escoliose',
-                        style: TextStyle(fontSize: 10, color: color)),
-                  ]),
-                ),
+                // Bloco label
+                if (item.blockLabel.isNotEmpty)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 9),
+                    decoration: BoxDecoration(
+                        color: color.withOpacity(.1),
+                        border: Border.all(
+                            color: color.withOpacity(.28)),
+                        borderRadius: BorderRadius.circular(10)),
+                    child: Row(children: [
+                      Text(item.blockLabel,
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: colorLight,
+                              fontWeight: FontWeight.w600)),
+                      // B3/B4 FIX: banner escoliose apenas mobilidade
+                      if (item.showScoliosisAlert) ...[
+                        const Spacer(),
+                        const Text('⚠ Escoliose',
+                            style: TextStyle(
+                                fontSize: 10,
+                                color: ForgeColors.mobilidade)),
+                      ],
+                    ]),
+                  ),
                 const SizedBox(height: 14),
-                Wrap(spacing: 4, children: const [
-                  _TagChip('Membros Inf.', color: colorLight),
-                  _TagChip('Alongamento')
-                ]),
-                const SizedBox(height: 8),
-                const Text('Figura 4\nDeitado',
+                Text(item.name,
                     textAlign: TextAlign.center,
-                    style: TextStyle(
+                    style: const TextStyle(
                         fontFamily: 'BebasNeue',
                         fontSize: 38,
                         color: ForgeColors.text,
                         height: .95)),
-                const SizedBox(height: 4),
-                const Text('Cruze tornozelo sobre joelho, puxe coxa',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 12, color: ForgeColors.muted)),
                 const SizedBox(height: 10),
-                const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      CircleAvatar(radius: 5, backgroundColor: colorLight),
-                      SizedBox(width: 10),
-                      Text('LADO ESQUERDO',
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: colorLight,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: .5)),
-                      SizedBox(width: 10),
-                      CircleAvatar(
-                          radius: 5, backgroundColor: ForgeColors.border),
-                    ]),
-                const SizedBox(height: 22),
+                // Indicador de lado — apenas se hasSides
+                if (item.hasSides) ...[
+                  Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircleAvatar(
+                            radius: 5,
+                            backgroundColor: _onLeftSide
+                                ? colorLight
+                                : ForgeColors.border),
+                        const SizedBox(width: 10),
+                        Text(
+                            _onLeftSide
+                                ? 'LADO ESQUERDO'
+                                : 'LADO DIREITO',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: colorLight,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: .5)),
+                        const SizedBox(width: 10),
+                        CircleAvatar(
+                            radius: 5,
+                            backgroundColor: !_onLeftSide
+                                ? colorLight
+                                : ForgeColors.border),
+                      ]),
+                  const SizedBox(height: 10),
+                ],
+                const SizedBox(height: 12),
+                // Timer circular
                 SizedBox(
                   width: 140,
                   height: 140,
                   child: Stack(alignment: Alignment.center, children: [
                     CustomPaint(
                         size: const Size(140, 140),
-                        painter: _CircleTimerPainter(pct: pct, color: color)),
+                        painter: _CircleTimerPainter(
+                            pct: pct, color: color)),
                     Column(mainAxisSize: MainAxisSize.min, children: [
                       Text('$_countdown',
                           style: const TextStyle(
@@ -958,36 +1043,57 @@ class _TimedSessionState extends ConsumerState<_TimedSession> {
                   ]),
                 ),
                 const SizedBox(height: 20),
-                Container(
-                  width: double.infinity,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                      color: ForgeColors.card,
-                      border: Border.all(color: ForgeColors.border),
-                      borderRadius: BorderRadius.circular(12)),
-                  child: RichText(
-                      text: const TextSpan(children: [
-                    TextSpan(
-                        text: 'A seguir: ',
-                        style:
-                            TextStyle(fontSize: 10, color: ForgeColors.muted)),
-                    TextSpan(
-                        text: 'Figura 4 — Lado Direito',
-                        style: TextStyle(
-                            fontSize: 12,
-                            color: ForgeColors.text,
-                            fontWeight: FontWeight.w500)),
-                  ])),
-                ),
+                // Próximo
+                if (nextItem != null)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(
+                        color: ForgeColors.card,
+                        border:
+                            Border.all(color: ForgeColors.border),
+                        borderRadius: BorderRadius.circular(12)),
+                    child: RichText(
+                        text: TextSpan(children: [
+                      const TextSpan(
+                          text: 'A seguir: ',
+                          style: TextStyle(
+                              fontSize: 10,
+                              color: ForgeColors.muted)),
+                      TextSpan(
+                          text: nextItem.hasSides
+                              ? '${nextItem.name} — Lado ${item.hasSides && item.leftDone && !item.done ? "Direito" : "Esquerdo"}'
+                              : nextItem.name,
+                          style: const TextStyle(
+                              fontSize: 12,
+                              color: ForgeColors.text,
+                              fontWeight: FontWeight.w500)),
+                    ])),
+                  ),
                 const SizedBox(height: 16),
                 GestureDetector(
-                  onTap: () => widget.onEnd(_elapsed),
+                  onTap: () {
+                    _timer?.cancel();
+                    _autoAdvance();
+                    _timer = Timer.periodic(
+                        const Duration(seconds: 1), (_) {
+                      setState(() {
+                        _elapsed++;
+                        if (_countdown > 0) _countdown--;
+                        if (_countdown == 0 &&
+                            _items.isNotEmpty) {
+                          _autoAdvance();
+                        }
+                      });
+                    });
+                  },
                   child: Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(15),
                     decoration: BoxDecoration(
-                        color: color, borderRadius: BorderRadius.circular(14)),
+                        color: color,
+                        borderRadius: BorderRadius.circular(14)),
                     child: const Text('CONCLUÍDO ✓',
                         textAlign: TextAlign.center,
                         style: TextStyle(
@@ -1074,19 +1180,28 @@ class _CorridaSessionState extends ConsumerState<_CorridaSession> {
   String _fmt(int s) =>
       '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
 
+  Future<void> _tryClose(BuildContext ctx) async {
+    final abandon = await _confirmAbandon(ctx);
+    if (abandon && ctx.mounted) {
+      _timer?.cancel();
+      ref.read(activeSessionProvider.notifier).clear();
+      ctx.pop();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     const color = ForgeColors.corrida;
     const colorLight = ForgeColors.corridaLight;
 
     return Scaffold(
-      backgroundColor: ForgeColors.bg,
+      backgroundColor: const Color(0xFF0a0a0a),
       body: SafeArea(
         child: Column(children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
             child: Row(children: [
-              _XBtn(onTap: () => context.pop()),
+              _XBtn(onTap: () => _tryClose(context)),
               const SizedBox(width: 12),
               Expanded(
                   child: Text(widget.workoutName,
@@ -1111,14 +1226,16 @@ class _CorridaSessionState extends ConsumerState<_CorridaSession> {
                         letterSpacing: 0,
                         height: 1)),
                 const Text('tempo decorrido',
-                    style: TextStyle(fontSize: 13, color: ForgeColors.muted)),
+                    style: TextStyle(
+                        fontSize: 13, color: ForgeColors.muted)),
                 const SizedBox(height: 16),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 24, vertical: 12),
                   decoration: BoxDecoration(
                       color: ForgeColors.card,
-                      border: Border.all(color: color.withOpacity(.3)),
+                      border: Border.all(
+                          color: color.withOpacity(.3)),
                       borderRadius: BorderRadius.circular(12)),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
                     const Column(children: [
@@ -1129,14 +1246,16 @@ class _CorridaSessionState extends ConsumerState<_CorridaSession> {
                               color: colorLight,
                               letterSpacing: 0)),
                       Text('meta',
-                          style:
-                              TextStyle(fontSize: 9, color: ForgeColors.muted)),
+                          style: TextStyle(
+                              fontSize: 9,
+                              color: ForgeColors.muted)),
                     ]),
                     Container(
                         width: 1,
                         height: 36,
                         color: ForgeColors.border,
-                        margin: const EdgeInsets.symmetric(horizontal: 24)),
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: 24)),
                     const Column(children: [
                       Text('5:30',
                           style: TextStyle(
@@ -1145,35 +1264,10 @@ class _CorridaSessionState extends ConsumerState<_CorridaSession> {
                               color: colorLight,
                               letterSpacing: 0)),
                       Text('pace alvo/km',
-                          style:
-                              TextStyle(fontSize: 9, color: ForgeColors.muted)),
+                          style: TextStyle(
+                              fontSize: 9,
+                              color: ForgeColors.muted)),
                     ]),
-                  ]),
-                ),
-                const SizedBox(height: 20),
-                Container(
-                  decoration: BoxDecoration(
-                      color: ForgeColors.card,
-                      border: Border.all(color: ForgeColors.border),
-                      borderRadius: BorderRadius.circular(14)),
-                  clipBehavior: Clip.hardEdge,
-                  child: Column(children: [
-                    _StepRow(
-                        done: true,
-                        label: 'Aquecimento',
-                        dist: '1 km',
-                        color: color),
-                    _StepRow(
-                        current: true,
-                        label: 'Corrida Principal',
-                        dist: '6 km',
-                        color: color),
-                    _StepRow(
-                        done: false,
-                        label: 'Volta à Calma',
-                        dist: '1 km',
-                        color: color,
-                        last: true),
                   ]),
                 ),
                 const SizedBox(height: 20),
@@ -1183,7 +1277,8 @@ class _CorridaSessionState extends ConsumerState<_CorridaSession> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(15),
                     decoration: BoxDecoration(
-                        color: color, borderRadius: BorderRadius.circular(14)),
+                        color: color,
+                        borderRadius: BorderRadius.circular(14)),
                     child: const Text('FINALIZAR SESSÃO',
                         textAlign: TextAlign.center,
                         style: TextStyle(
@@ -1201,75 +1296,8 @@ class _CorridaSessionState extends ConsumerState<_CorridaSession> {
   }
 }
 
-class _StepRow extends StatelessWidget {
-  final bool done, current, last;
-  final String label, dist;
-  final Color color;
-  const _StepRow(
-      {this.done = false,
-      this.current = false,
-      this.last = false,
-      required this.label,
-      required this.dist,
-      required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: current ? color.withOpacity(.05) : Colors.transparent,
-        border: Border(
-            left:
-                current ? BorderSide(color: color, width: 3) : BorderSide.none,
-            bottom: last
-                ? BorderSide.none
-                : const BorderSide(color: ForgeColors.border)),
-      ),
-      child: Row(children: [
-        Container(
-          width: 20,
-          height: 20,
-          decoration: BoxDecoration(
-              color: done
-                  ? const Color(0xFF22c55e)
-                  : current
-                      ? color
-                      : ForgeColors.border,
-              shape: BoxShape.circle),
-          child: done
-              ? const Icon(Icons.check, color: Colors.white, size: 12)
-              : current
-                  ? const Icon(Icons.play_arrow, color: Colors.white, size: 10)
-                  : null,
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-            child: Text(label,
-                style: TextStyle(
-                    fontSize: 13,
-                    color: done
-                        ? ForgeColors.muted
-                        : current
-                            ? ForgeColors.text
-                            : ForgeColors.muted2,
-                    fontWeight:
-                        current ? FontWeight.w600 : FontWeight.normal))),
-        Text(dist,
-            style: TextStyle(
-                fontSize: 12,
-                color: done
-                    ? ForgeColors.muted2
-                    : current
-                        ? ForgeColors.corridaLight
-                        : ForgeColors.muted2)),
-      ]),
-    );
-  }
-}
-
 // ════════════════════════════════════
-// FORMULÁRIO PÓS-CORRIDA
+// FORMULÁRIO PÓS-CORRIDA — B6/F6 FIX: pace por km
 // ════════════════════════════════════
 class RunFormScreen extends ConsumerStatefulWidget {
   const RunFormScreen({super.key});
@@ -1281,12 +1309,17 @@ class RunFormScreen extends ConsumerStatefulWidget {
 class _RunFormScreenState extends ConsumerState<RunFormScreen> {
   final _kmCtrl = TextEditingController(text: '');
   final _timeCtrl = TextEditingController(text: '');
+  // B6/F6: pace por km
+  List<TextEditingController> _paceCtrs = [];
+  int _kmCount = 0;
 
   double get _km => double.tryParse(_kmCtrl.text) ?? 0;
+
   int get _totalSeconds {
     final parts = _timeCtrl.text.split(':');
     if (parts.length == 2)
-      return (int.tryParse(parts[0]) ?? 0) * 60 + (int.tryParse(parts[1]) ?? 0);
+      return (int.tryParse(parts[0]) ?? 0) * 60 +
+          (int.tryParse(parts[1]) ?? 0);
     return 0;
   }
 
@@ -1298,10 +1331,39 @@ class _RunFormScreenState extends ConsumerState<RunFormScreen> {
     return '$m:${s.toString().padLeft(2, '0')}';
   }
 
+  void _onKmChanged(String v) {
+    final n = double.tryParse(v)?.ceil() ?? 0;
+    if (n != _kmCount) {
+      setState(() {
+        _kmCount = n;
+        // Cria/remove controllers conforme o número de km
+        while (_paceCtrs.length < n) {
+          _paceCtrs.add(TextEditingController());
+        }
+        while (_paceCtrs.length > n) {
+          _paceCtrs.removeLast().dispose();
+        }
+      });
+    }
+  }
+
   void _save() {
-    ref
-        .read(activeSessionProvider.notifier)
-        .setRunData(km: _km, totalSeconds: _totalSeconds, paces: []);
+    // B6: converte pace strings para segundos por km
+    final paces = _paceCtrs.map((c) {
+      final parts = c.text.split(':');
+      if (parts.length == 2) {
+        return ((int.tryParse(parts[0]) ?? 0) * 60 +
+                (int.tryParse(parts[1]) ?? 0))
+            .toDouble();
+      }
+      return 0.0;
+    }).toList();
+
+    ref.read(activeSessionProvider.notifier).setRunData(
+          km: _km,
+          totalSeconds: _totalSeconds,
+          paces: paces,
+        );
     context.pushReplacement('/session/summary');
   }
 
@@ -1309,6 +1371,7 @@ class _RunFormScreenState extends ConsumerState<RunFormScreen> {
   void dispose() {
     _kmCtrl.dispose();
     _timeCtrl.dispose();
+    for (final c in _paceCtrs) c.dispose();
     super.dispose();
   }
 
@@ -1318,13 +1381,15 @@ class _RunFormScreenState extends ConsumerState<RunFormScreen> {
     const colorLight = ForgeColors.corridaLight;
 
     return Scaffold(
-      backgroundColor: ForgeColors.bg,
+      backgroundColor: const Color(0xFF0a0a0a),
       body: SafeArea(
         child: Column(children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
             child: Row(children: [
-              _XBtn(onTap: () => context.pop(), icon: LucideIcons.arrow_left),
+              _XBtn(
+                  onTap: () => context.pop(),
+                  icon: LucideIcons.arrow_left),
               const SizedBox(width: 12),
               const Expanded(
                   child: Text('Registrar Corrida',
@@ -1335,10 +1400,11 @@ class _RunFormScreenState extends ConsumerState<RunFormScreen> {
               GestureDetector(
                 onTap: _save,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 8),
                   decoration: BoxDecoration(
-                      color: color, borderRadius: BorderRadius.circular(10)),
+                      color: color,
+                      borderRadius: BorderRadius.circular(10)),
                   child: const Text('SALVAR',
                       style: TextStyle(
                           fontFamily: 'BebasNeue',
@@ -1357,20 +1423,22 @@ class _RunFormScreenState extends ConsumerState<RunFormScreen> {
                     Row(children: [
                       Expanded(
                           child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
                               children: [
                             const _SLabel('Km totais'),
                             _InputBox(
                                 controller: _kmCtrl,
                                 color: color,
                                 colorLight: colorLight,
-                                onChanged: (_) => setState(() {}),
+                                onChanged: _onKmChanged,
                                 hint: '0.0'),
                           ])),
                       const SizedBox(width: 10),
                       Expanded(
                           child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
                               children: [
                             const _SLabel('Tempo (mm:ss)'),
                             _InputBox(
@@ -1390,11 +1458,13 @@ class _RunFormScreenState extends ConsumerState<RunFormScreen> {
                           border: Border.all(color: ForgeColors.border),
                           borderRadius: BorderRadius.circular(12)),
                       child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          mainAxisAlignment:
+                              MainAxisAlignment.spaceBetween,
                           children: [
                             const Text('Pace médio calculado',
                                 style: TextStyle(
-                                    fontSize: 13, color: ForgeColors.muted)),
+                                    fontSize: 13,
+                                    color: ForgeColors.muted)),
                             Text('$_pace /km',
                                 style: const TextStyle(
                                     fontSize: 13,
@@ -1402,6 +1472,98 @@ class _RunFormScreenState extends ConsumerState<RunFormScreen> {
                                     fontWeight: FontWeight.w600)),
                           ]),
                     ),
+                    // B6/F6: tabela de pace por km
+                    if (_kmCount > 0) ...[
+                      const SizedBox(height: 16),
+                      const _SLabel('Pace por km'),
+                      Container(
+                        decoration: BoxDecoration(
+                            color: ForgeColors.card,
+                            border:
+                                Border.all(color: ForgeColors.border),
+                            borderRadius: BorderRadius.circular(14)),
+                        clipBehavior: Clip.hardEdge,
+                        child: Column(children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 8),
+                            color: ForgeColors.surface,
+                            child: const Row(children: [
+                              Expanded(
+                                  child: Text('Km',
+                                      style: TextStyle(
+                                          fontSize: 9,
+                                          color: ForgeColors.muted,
+                                          fontWeight: FontWeight.w600))),
+                              SizedBox(
+                                  width: 120,
+                                  child: Text('Pace (mm:ss)',
+                                      textAlign: TextAlign.right,
+                                      style: TextStyle(
+                                          fontSize: 9,
+                                          color: ForgeColors.muted,
+                                          fontWeight: FontWeight.w600))),
+                            ]),
+                          ),
+                          ...List.generate(_kmCount, (i) {
+                            final isLast = i == _kmCount - 1;
+                            return Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 9),
+                              decoration: BoxDecoration(
+                                  border: Border(
+                                      top: BorderSide(
+                                          color: ForgeColors.border))),
+                              child: Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text('Km ${i + 1}',
+                                        style: const TextStyle(
+                                            fontSize: 12,
+                                            color: ForgeColors.muted)),
+                                    SizedBox(
+                                      width: 120,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 10, vertical: 4),
+                                        decoration: BoxDecoration(
+                                            color: color.withOpacity(.1),
+                                            border: Border.all(
+                                                color: color.withOpacity(.3)),
+                                            borderRadius:
+                                                BorderRadius.circular(8)),
+                                        child: TextField(
+                                          controller: _paceCtrs[i],
+                                          keyboardType:
+                                              TextInputType.number,
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(
+                                              fontFamily: 'BebasNeue',
+                                              fontSize: 16,
+                                              color: colorLight,
+                                              letterSpacing: 0),
+                                          decoration:
+                                              const InputDecoration(
+                                            border: InputBorder.none,
+                                            isDense: true,
+                                            contentPadding: EdgeInsets.zero,
+                                            hintText: '0:00',
+                                            hintStyle: TextStyle(
+                                                fontFamily: 'BebasNeue',
+                                                fontSize: 16,
+                                                color: Color(0xFF444444),
+                                                letterSpacing: 0),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ]),
+                            );
+                          }),
+                        ]),
+                      ),
+                    ],
                   ]),
             ),
           ),
@@ -1425,7 +1587,8 @@ class _InputBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
             color: ForgeColors.card,
             border: Border.all(color: color),
@@ -1464,7 +1627,8 @@ class SessionSummaryScreen extends ConsumerStatefulWidget {
       _SessionSummaryScreenState();
 }
 
-class _SessionSummaryScreenState extends ConsumerState<SessionSummaryScreen> {
+class _SessionSummaryScreenState
+    extends ConsumerState<SessionSummaryScreen> {
   int? _effort;
   final _notesCtrl = TextEditingController();
   bool _saving = false;
@@ -1476,7 +1640,6 @@ class _SessionSummaryScreenState extends ConsumerState<SessionSummaryScreen> {
   }
 
   Future<void> _save() async {
-    // Guard síncrono — evita double-save se usuário tocar duas vezes rápido
     if (_saving) return;
     _saving = true;
     if (mounted) setState(() {});
@@ -1489,13 +1652,13 @@ class _SessionSummaryScreenState extends ConsumerState<SessionSummaryScreen> {
     if (session != null) {
       final ts = session.toTrainingSession();
 
-      // Detecta PRs (apenas musculação tem peso)
       int prCount = 0;
       if (session.workoutType == WorkoutType.musculacao) {
         for (final ex in session.exercises) {
           if (ex.exerciseId == null || ex.exerciseId == 0) continue;
           final completedSets = ex.sets
-              .where((s) => s.completed && s.weight != null && s.weight! > 0)
+              .where((s) =>
+                  s.completed && s.weight != null && s.weight! > 0)
               .toList();
           if (completedSets.isEmpty) continue;
           final maxWeight = completedSets
@@ -1515,9 +1678,9 @@ class _SessionSummaryScreenState extends ConsumerState<SessionSummaryScreen> {
 
       ts.prCount = prCount;
       await ref.read(sessionRepositoryProvider).save(ts);
-
-      // Incrementa completedSessions no macro (uma única vez)
-      await ref.read(macroCycleRepositoryProvider).incrementCompletedSessions();
+      await ref
+          .read(macroCycleRepositoryProvider)
+          .incrementCompletedSessions();
     }
 
     notifier.clear();
@@ -1526,128 +1689,147 @@ class _SessionSummaryScreenState extends ConsumerState<SessionSummaryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = ref.watch(themeProvider).valueOrNull ?? ForgeThemes.teal;
+    final theme =
+        ref.watch(themeProvider).valueOrNull ?? ForgeThemes.teal;
     final session = ref.watch(activeSessionProvider);
 
     final workoutName = session?.workoutName ?? '—';
-    final durationMin = session != null ? session.durationSeconds ~/ 60 : 0;
+    final durationMin =
+        session != null ? session.durationSeconds ~/ 60 : 0;
     final volume = session?.totalVolume ?? 0.0;
     final sets = session?.exercises.fold<int>(
-            0, (s, e) => s + e.sets.where((set) => set.completed).length) ??
+            0,
+            (s, e) =>
+                s + e.sets.where((set) => set.completed).length) ??
         0;
 
     return Scaffold(
-      backgroundColor: ForgeColors.bg,
+      backgroundColor: const Color(0xFF0a0a0a),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Center(
-                child: Column(children: [
-              const SizedBox(height: 8),
-              Container(
-                width: 60,
-                height: 60,
-                decoration: BoxDecoration(
-                    color: theme.accent.withOpacity(.12),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: theme.accent, width: 2)),
-                child: Icon(Icons.check, color: theme.accent, size: 28),
-              ),
-              const SizedBox(height: 12),
-              const Text('Treino Concluído!',
-                  style: TextStyle(
-                      fontFamily: 'BebasNeue',
-                      fontSize: 32,
-                      color: ForgeColors.text)),
-              Text('$workoutName · ${durationMin}min',
-                  style:
-                      const TextStyle(fontSize: 13, color: ForgeColors.muted)),
-            ])),
-            const SizedBox(height: 24),
-            Row(children: [
-              _StatMini(
-                  value: '${durationMin}min',
-                  label: 'Tempo',
-                  accent: theme.accent),
-              const SizedBox(width: 8),
-              _StatMini(
-                  value: volume > 0
-                      ? '${(volume / 1000).toStringAsFixed(1)}t'
-                      : '—',
-                  label: 'Volume',
-                  accent: theme.accent),
-              const SizedBox(width: 8),
-              _StatMini(value: '$sets', label: 'Séries', accent: theme.accent),
-            ]),
-            const SizedBox(height: 18),
-            const _SLabel('Como foi o treino?'),
-            Row(
-                children: ['😵', '😓', '😊', '💪', '🔥']
-                    .asMap()
-                    .entries
-                    .map((e) => Expanded(
-                          child: GestureDetector(
-                            onTap: () => setState(() => _effort = e.key),
-                            child: Container(
-                              margin: EdgeInsets.only(right: e.key < 4 ? 8 : 0),
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                              decoration: BoxDecoration(
-                                color: _effort == e.key
-                                    ? theme.accent.withOpacity(.12)
-                                    : ForgeColors.card,
-                                border: Border.all(
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                    child: Column(children: [
+                  const SizedBox(height: 8),
+                  Container(
+                    width: 60,
+                    height: 60,
+                    decoration: BoxDecoration(
+                        color: theme.accent.withOpacity(.12),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                            color: theme.accent, width: 2)),
+                    child: Icon(Icons.check, color: theme.accent, size: 28),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('Treino Concluído!',
+                      style: TextStyle(
+                          fontFamily: 'BebasNeue',
+                          fontSize: 32,
+                          color: ForgeColors.text)),
+                  Text('$workoutName · ${durationMin}min',
+                      style: const TextStyle(
+                          fontSize: 13, color: ForgeColors.muted)),
+                ])),
+                const SizedBox(height: 24),
+                Row(children: [
+                  _StatMini(
+                      value: '${durationMin}min',
+                      label: 'Tempo',
+                      accent: theme.accent),
+                  const SizedBox(width: 8),
+                  _StatMini(
+                      value: volume > 0
+                          ? '${(volume / 1000).toStringAsFixed(1)}t'
+                          : '—',
+                      label: 'Volume',
+                      accent: theme.accent),
+                  const SizedBox(width: 8),
+                  _StatMini(
+                      value: '$sets',
+                      label: 'Séries',
+                      accent: theme.accent),
+                ]),
+                const SizedBox(height: 18),
+                const _SLabel('Como foi o treino?'),
+                Row(
+                    children: ['😵', '😓', '😊', '💪', '🔥']
+                        .asMap()
+                        .entries
+                        .map((e) => Expanded(
+                              child: GestureDetector(
+                                onTap: () =>
+                                    setState(() => _effort = e.key),
+                                child: Container(
+                                  margin: EdgeInsets.only(
+                                      right: e.key < 4 ? 8 : 0),
+                                  padding: const EdgeInsets.symmetric(
+                                      vertical: 10),
+                                  decoration: BoxDecoration(
                                     color: _effort == e.key
-                                        ? theme.accent
-                                        : ForgeColors.border),
-                                borderRadius: BorderRadius.circular(12),
+                                        ? theme.accent.withOpacity(.12)
+                                        : ForgeColors.card,
+                                    border: Border.all(
+                                        color: _effort == e.key
+                                            ? theme.accent
+                                            : ForgeColors.border),
+                                    borderRadius:
+                                        BorderRadius.circular(12),
+                                  ),
+                                  child: Text(e.value,
+                                      textAlign: TextAlign.center,
+                                      style:
+                                          const TextStyle(fontSize: 20)),
+                                ),
                               ),
-                              child: Text(e.value,
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(fontSize: 20)),
-                            ),
-                          ),
-                        ))
-                    .toList()),
-            const SizedBox(height: 20),
-            const _SLabel('Notas'),
-            Container(
-              decoration: BoxDecoration(
-                  color: ForgeColors.card,
-                  border: Border.all(color: ForgeColors.border),
-                  borderRadius: BorderRadius.circular(12)),
-              child: TextField(
-                controller: _notesCtrl,
-                maxLines: 3,
-                style: const TextStyle(fontSize: 13, color: ForgeColors.text),
-                decoration: const InputDecoration(
-                    hintText: 'Anotações opcionais...',
-                    hintStyle: TextStyle(color: ForgeColors.muted),
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.all(14)),
-              ),
-            ),
-            const SizedBox(height: 24),
-            GestureDetector(
-              onTap: _saving ? null : _save,
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(15),
-                decoration: BoxDecoration(
-                    color: _saving ? ForgeColors.muted2 : theme.accent,
-                    borderRadius: BorderRadius.circular(14)),
-                child: Text(_saving ? 'SALVANDO...' : 'SALVAR SESSÃO',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                        fontFamily: 'BebasNeue',
-                        fontSize: 20,
-                        color: theme.id == 'neon'
-                            ? Colors.black
-                            : ForgeColors.bg)),
-              ),
-            ),
-          ]),
+                            ))
+                        .toList()),
+                const SizedBox(height: 20),
+                const _SLabel('Notas'),
+                Container(
+                  decoration: BoxDecoration(
+                      color: ForgeColors.card,
+                      border: Border.all(color: ForgeColors.border),
+                      borderRadius: BorderRadius.circular(12)),
+                  child: TextField(
+                    controller: _notesCtrl,
+                    maxLines: 3,
+                    style: const TextStyle(
+                        fontSize: 13, color: ForgeColors.text),
+                    decoration: const InputDecoration(
+                        hintText: 'Anotações opcionais...',
+                        hintStyle:
+                            TextStyle(color: ForgeColors.muted),
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.all(14)),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                GestureDetector(
+                  onTap: _saving ? null : _save,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(15),
+                    decoration: BoxDecoration(
+                        color: _saving
+                            ? ForgeColors.muted2
+                            : theme.accent,
+                        borderRadius: BorderRadius.circular(14)),
+                    child: Text(
+                        _saving ? 'SALVANDO...' : 'SALVAR SESSÃO',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            fontFamily: 'BebasNeue',
+                            fontSize: 20,
+                            color: theme.id == 'neon'
+                                ? Colors.black
+                                : ForgeColors.bg)),
+                  ),
+                ),
+              ]),
         ),
       ),
     );
@@ -1655,31 +1837,13 @@ class _SessionSummaryScreenState extends ConsumerState<SessionSummaryScreen> {
 }
 
 // ── Shared widgets
-class _TagChip extends StatelessWidget {
-  final String label;
-  final Color? color;
-  const _TagChip(this.label, {this.color});
-
-  @override
-  Widget build(BuildContext context) => Container(
-        margin: const EdgeInsets.only(right: 4, bottom: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-        decoration: BoxDecoration(
-            color: (color ?? ForgeColors.muted).withOpacity(.1),
-            borderRadius: BorderRadius.circular(20)),
-        child: Text(label,
-            style: TextStyle(
-                fontSize: 9,
-                color: color ?? ForgeColors.muted,
-                fontWeight: FontWeight.w500)),
-      );
-}
-
 class _StatMini extends StatelessWidget {
   final String value, label;
   final Color accent;
   const _StatMini(
-      {required this.value, required this.label, required this.accent});
+      {required this.value,
+      required this.label,
+      required this.accent});
 
   @override
   Widget build(BuildContext context) => Expanded(
@@ -1697,7 +1861,8 @@ class _StatMini extends StatelessWidget {
                     color: accent,
                     letterSpacing: 0)),
             Text(label,
-                style: const TextStyle(fontSize: 10, color: ForgeColors.muted)),
+                style: const TextStyle(
+                    fontSize: 10, color: ForgeColors.muted)),
           ]),
         ),
       );
